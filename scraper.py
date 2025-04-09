@@ -71,12 +71,12 @@ def get_draw_results_by_date(draw_date):
 
 def get_available_draw_dates():
     """
-    Fetch available draw dates from the Singapore Pools API
+    Fetch available draw dates and queryStrings from the Singapore Pools API
     
     Returns:
-        List of available draw dates in 'YYYY-MM-DD' format
+        Dictionary with dates as keys and queryStrings as values
     """
-    url = "https://www.singaporepools.com.sg/DataFileArchive/Lottery/Output/toto_result_draw_list_en.html?v=2025y4m10d1h0m"
+    url = "https://www.singaporepools.com.sg/DataFileArchive/Lottery/Output/toto_result_draw_list_en.html"
     
     st.info("Fetching available draw dates from Singapore Pools API...")
     
@@ -99,87 +99,90 @@ def get_available_draw_dates():
                 data = response.json()
                 st.info("Successfully fetched draw dates as JSON")
                 
-                # Extract draw dates from the JSON data
-                available_dates = []
+                # Extract draw dates and queryStrings from the JSON data
+                date_to_query = {}
                 
                 # Check the structure of the JSON data
                 if isinstance(data, list):
                     # If it's a list of draw information
                     for draw in data:
-                        if 'drawDate' in draw:
+                        if 'drawDate' in draw and 'queryString' in draw:
                             date_str = draw['drawDate']
+                            query_string = draw['queryString']
+                            
                             try:
                                 # Try to parse the date based on the format returned by the API
                                 # The API might return dates in different formats, so we try a few common ones
+                                date_formatted = None
                                 for fmt in ['%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%d %b %Y', '%d %B %Y']:
                                     try:
                                         date = datetime.strptime(date_str, fmt)
-                                        available_dates.append(date.strftime('%Y-%m-%d'))
+                                        date_formatted = date.strftime('%Y-%m-%d')
                                         break
                                     except ValueError:
                                         continue
-                            except Exception as e:
-                                st.warning(f"Failed to parse date {date_str}: {str(e)}")
-                elif isinstance(data, dict) and 'draws' in data:
-                    # If it's a dictionary with a 'draws' key
-                    for draw in data['draws']:
-                        if 'drawDate' in draw:
-                            date_str = draw['drawDate']
-                            try:
-                                # Try to parse the date
-                                for fmt in ['%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%d %b %Y', '%d %B %Y']:
-                                    try:
-                                        date = datetime.strptime(date_str, fmt)
-                                        available_dates.append(date.strftime('%Y-%m-%d'))
-                                        break
-                                    except ValueError:
-                                        continue
+                                
+                                if date_formatted:
+                                    date_to_query[date_formatted] = query_string
+                                    st.info(f"Found draw date: {date_formatted} with query string: {query_string}")
                             except Exception as e:
                                 st.warning(f"Failed to parse date {date_str}: {str(e)}")
                 
                 # Log the number of available dates
-                st.info(f"Found {len(available_dates)} available draw dates")
-                return sorted(available_dates, reverse=True)  # Return dates in descending order
+                st.info(f"Found {len(date_to_query)} available draw dates")
+                return date_to_query
             
             except json.JSONDecodeError:
                 # If it's not valid JSON, try to parse as HTML
                 st.info("Response is not JSON, trying to parse as HTML...")
                 soup = BeautifulSoup(response.text, 'html.parser')
                 
-                # Look for dates in the HTML
-                # This pattern matches dates in various formats
-                date_pattern = re.compile(r'\d{1,2}[/\-\s][A-Za-z]{0,9}[/\-\s]\d{4}|\d{4}[/\-]\d{1,2}[/\-]\d{1,2}')
-                date_elements = soup.find_all(string=lambda text: bool(text and date_pattern.search(str(text))))
+                # Look for draw elements in the HTML
+                date_to_query = {}
                 
-                available_dates = []
-                for element in date_elements:
-                    element_str = str(element)
-                    date_match = date_pattern.search(element_str)
-                    if date_match:
-                        date_str = date_match.group(0)
-                        try:
-                            # Try various date formats
-                            for fmt in ['%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%d %b %Y', '%d %B %Y']:
-                                try:
-                                    date = datetime.strptime(date_str, fmt)
-                                    available_dates.append(date.strftime('%Y-%m-%d'))
-                                    break
-                                except ValueError:
-                                    continue
-                        except Exception as e:
-                            st.warning(f"Failed to parse date {date_str}: {str(e)}")
+                # We need to find both dates and their corresponding queryStrings
+                # This is more challenging in HTML, but let's look for elements with href attributes
+                for link in soup.find_all('a', href=True):
+                    href = link.get('href')
+                    # Check if this link might be to a draw result page
+                    if 'toto_results.aspx?' in href:
+                        # Extract the query string
+                        query_string = href.split('toto_results.aspx?')[1]
+                        # Try to find a date in the link text
+                        link_text = link.get_text(strip=True)
+                        date_pattern = re.compile(r'\d{1,2}[/\-\s][A-Za-z]{0,9}[/\-\s]\d{4}|\d{4}[/\-]\d{1,2}[/\-]\d{1,2}')
+                        date_match = date_pattern.search(link_text)
+                        
+                        if date_match:
+                            date_str = date_match.group(0)
+                            try:
+                                # Try various date formats
+                                date_formatted = None
+                                for fmt in ['%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%d %b %Y', '%d %B %Y']:
+                                    try:
+                                        date = datetime.strptime(date_str, fmt)
+                                        date_formatted = date.strftime('%Y-%m-%d')
+                                        break
+                                    except ValueError:
+                                        continue
+                                
+                                if date_formatted:
+                                    date_to_query[date_formatted] = query_string
+                                    st.info(f"Found draw date: {date_formatted} with query string: {query_string}")
+                            except Exception as e:
+                                st.warning(f"Failed to parse date {date_str}: {str(e)}")
                 
                 # Log the number of available dates
-                st.info(f"Found {len(available_dates)} available draw dates from HTML")
-                return sorted(list(set(available_dates)), reverse=True)  # Remove duplicates and sort
+                st.info(f"Found {len(date_to_query)} available draw dates from HTML")
+                return date_to_query
         
         else:
             st.error(f"Failed to fetch draw dates. Status code: {response.status_code}")
-            return []
+            return {}
     
     except Exception as e:
         st.error(f"Error fetching draw dates: {str(e)}")
-        return []
+        return {}
 
 def scrape_toto_results(dates_to_scrape=None):
     """
@@ -196,96 +199,276 @@ def scrape_toto_results(dates_to_scrape=None):
     try:
         st.info("Attempting to get TOTO results...")
         
+        # Get date to queryString mapping
+        date_to_query = get_available_draw_dates()
+        
         # If no specific dates provided, get the latest available date
         if not dates_to_scrape:
             st.info("No specific dates provided, fetching latest available draw date...")
-            available_dates = get_available_draw_dates()
-            if available_dates:
-                dates_to_scrape = [available_dates[0]]  # Get the most recent date
+            if date_to_query:
+                # Get the most recent date (first key)
+                dates_to_scrape = [next(iter(date_to_query))]
                 st.info(f"Will fetch latest draw date: {dates_to_scrape[0]}")
             else:
                 st.warning("No available dates found from API, will try general scraping")
         
-        # Try API approach first for each date
+        # Try using queryString approach first for each date
         api_success = False
         if dates_to_scrape:
             for date in dates_to_scrape:
-                st.info(f"Trying to fetch results for {date} using API...")
-                draw_data = get_draw_results_by_date(date)
-                
-                if draw_data:
-                    # Extract data from API response
+                # Check if we have a queryString for this date
+                if date in date_to_query:
+                    query_string = date_to_query[date]
+                    st.info(f"Found queryString for date {date}: {query_string}")
+                    
+                    # Build the URL with the queryString
+                    base_url = "https://www.singaporepools.com.sg/en/product/sr/Pages/toto_results.aspx"
+                    url = f"{base_url}?{query_string}"
+                    st.info(f"Attempting to fetch results from: {url}")
+                    
+                    # Set up headers for the request
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                        'Accept-Language': 'en-US,en;q=0.5',
+                        'Accept-Encoding': 'gzip, deflate, br',
+                        'Connection': 'keep-alive',
+                        'Upgrade-Insecure-Requests': '1',
+                        'Cache-Control': 'max-age=0',
+                        'Referer': 'https://www.singaporepools.com.sg/en/Pages/Home.aspx',
+                    }
+                    
                     try:
-                        st.info(f"Processing API data for {date}...")
+                        # Disable SSL verification for this specific request
+                        response = requests.get(url, headers=headers, verify=False)
+                        status = response.status_code
                         
-                        # Different APIs might have different response structures, so we need to handle various formats
-                        # Extract draw number
-                        draw_number = None
-                        if 'drawNumber' in draw_data:
-                            draw_number = int(draw_data['drawNumber'])
-                        elif 'drawNo' in draw_data:
-                            draw_number = int(draw_data['drawNo'])
-                        
-                        # Extract winning numbers
-                        winning_numbers = []
-                        additional_number = None
-                        
-                        # Check different fields that might contain winning numbers
-                        if 'winningNumbers' in draw_data:
-                            if isinstance(draw_data['winningNumbers'], list):
-                                winning_numbers = [int(num) for num in draw_data['winningNumbers']]
-                            elif isinstance(draw_data['winningNumbers'], str):
-                                winning_numbers = [int(num) for num in draw_data['winningNumbers'].split(',')]
-                        
-                        # Check for additional number
-                        if 'additionalNumber' in draw_data:
-                            additional_number = int(draw_data['additionalNumber'])
-                        
-                        # Initialize prize data
-                        prize_data = {
-                            'group_1_winners': 0, 'group_1_prize': 0,
-                            'group_2_winners': 0, 'group_2_prize': 0,
-                            'group_3_winners': 0, 'group_3_prize': 0,
-                            'group_4_winners': 0, 'group_4_prize': 0,
-                            'group_5_winners': 0, 'group_5_prize': 0,
-                            'group_6_winners': 0, 'group_6_prize': 0,
-                            'group_7_winners': 0, 'group_7_prize': 0
-                        }
-                        
-                        # Extract prize information if available
-                        if 'prizes' in draw_data and isinstance(draw_data['prizes'], list):
-                            for prize in draw_data['prizes']:
-                                if 'groupId' in prize and 'winners' in prize and 'prize' in prize:
-                                    group_id = int(prize['groupId'])
-                                    if 1 <= group_id <= 7:
-                                        prize_data[f'group_{group_id}_winners'] = int(prize['winners'])
-                                        # Prize might be a string with $ and commas
-                                        prize_amount = prize['prize']
-                                        if isinstance(prize_amount, str):
-                                            prize_amount = prize_amount.replace('$', '').replace(',', '')
-                                        prize_data[f'group_{group_id}_prize'] = float(prize_amount)
-                        
-                        # Create result entry
-                        if draw_number and winning_numbers and additional_number:
-                            result = {
-                                'draw_date': date,
-                                'draw_number': draw_number,
-                                'winning_numbers': winning_numbers,
-                                'additional_number': additional_number,
-                                **prize_data
+                        if status == 200:
+                            html_content = response.text
+                            st.info(f"Successfully downloaded {len(html_content)} bytes")
+                            
+                            # Parse the HTML to extract information
+                            soup = BeautifulSoup(html_content, 'html.parser')
+                            
+                            # Extract draw number
+                            draw_number = None
+                            draw_pattern = re.compile(r'Draw No\.?\s*(\d+)', re.IGNORECASE)
+                            draw_elements = soup.find_all(string=lambda text: bool(text and draw_pattern.search(str(text))))
+                            
+                            if draw_elements:
+                                for element in draw_elements:
+                                    element_str = str(element)
+                                    match = draw_pattern.search(element_str)
+                                    if match:
+                                        draw_number = int(match.group(1))
+                                        st.info(f"Found draw number: {draw_number}")
+                                        break
+                            
+                            # Extract winning numbers
+                            winning_numbers = []
+                            additional_number = None
+                            
+                            # Look for the table that contains the winning numbers
+                            winning_numbers_header = soup.find(string=re.compile("Winning Numbers", re.IGNORECASE))
+                            if winning_numbers_header:
+                                # Find the table by going up the DOM tree
+                                parent = winning_numbers_header.parent
+                                while parent and parent.name != 'table':
+                                    parent = parent.parent
+                                
+                                if parent and parent.name == 'table':
+                                    # Extract numbers from this table
+                                    for cell in parent.find_all(['td', 'th']):
+                                        cell_text = cell.get_text(strip=True)
+                                        if cell_text.isdigit() and 1 <= int(cell_text) <= 49:  # TOTO numbers are 1-49
+                                            winning_numbers.append(int(cell_text))
+                            
+                            # Look for additional number
+                            if not additional_number:
+                                additional_header = soup.find(string=re.compile("Additional Number", re.IGNORECASE))
+                                if additional_header:
+                                    # Find closest table by going up the DOM tree
+                                    parent = additional_header.parent
+                                    while parent and parent.name != 'table':
+                                        parent = parent.parent
+                                    
+                                    if parent and parent.name == 'table':
+                                        for cell in parent.find_all(['td', 'th']):
+                                            cell_text = cell.get_text(strip=True)
+                                            if cell_text.isdigit() and 1 <= int(cell_text) <= 49:
+                                                additional_number = int(cell_text)
+                                                break
+                            
+                            # Initialize prize data
+                            prize_data = {
+                                'group_1_winners': 0, 'group_1_prize': 0,
+                                'group_2_winners': 0, 'group_2_prize': 0,
+                                'group_3_winners': 0, 'group_3_prize': 0,
+                                'group_4_winners': 0, 'group_4_prize': 0,
+                                'group_5_winners': 0, 'group_5_prize': 0,
+                                'group_6_winners': 0, 'group_6_prize': 0,
+                                'group_7_winners': 0, 'group_7_prize': 0
                             }
-                            results.append(result)
-                            st.success(f"Successfully processed draw #{draw_number} on {date} from API")
-                            api_success = True
+                            
+                            # Look for the prize table
+                            all_tables = soup.find_all('table')
+                            for table in all_tables:
+                                # Try to read the table with pandas
+                                try:
+                                    table_html = str(table)
+                                    df_table = pd.read_html(StringIO(table_html))[0]
+                                    
+                                    # Check if this looks like a prize table by looking for "Group" in column names or values
+                                    has_group = any('group' in str(col).lower() for col in df_table.columns) or \
+                                                any('group' in str(val).lower() for val in df_table.values.flatten() if isinstance(val, str))
+                                    
+                                    if has_group:
+                                        st.info("Found prize table")
+                                        
+                                        # Try to extract group, winners, and prize information
+                                        for _, row in df_table.iterrows():
+                                            # Convert row to dict for easier handling
+                                            row_dict = row.to_dict()
+                                            
+                                            # Look for "Group N" pattern in any cell
+                                            group_found = False
+                                            group_num = None
+                                            
+                                            for _, cell_value in row_dict.items():
+                                                if isinstance(cell_value, str):
+                                                    group_match = re.search(r'Group\s*(\d)', str(cell_value), re.IGNORECASE)
+                                                    if group_match:
+                                                        group_num = int(group_match.group(1))
+                                                        group_found = True
+                                                        break
+                                            
+                                            if group_found and group_num:
+                                                # Look for prize amount and winners in this row
+                                                prize_amount = None
+                                                winners_count = None
+                                                
+                                                for _, cell_value in row_dict.items():
+                                                    # Look for dollar amounts for prize
+                                                    if isinstance(cell_value, str) and '$' in str(cell_value):
+                                                        prize_match = re.search(r'\$\s*([\d,]+\.?\d*)', str(cell_value))
+                                                        if prize_match:
+                                                            prize_amount = float(prize_match.group(1).replace(',', ''))
+                                                    
+                                                    # Look for number of winners
+                                                    if isinstance(cell_value, (int, float)) or (isinstance(cell_value, str) and cell_value.isdigit()):
+                                                        winners_count = int(str(cell_value).replace(',', ''))
+                                                
+                                                # Update prize data if we found information
+                                                if prize_amount is not None:
+                                                    prize_data[f'group_{group_num}_prize'] = prize_amount
+                                                
+                                                if winners_count is not None:
+                                                    prize_data[f'group_{group_num}_winners'] = winners_count
+                                except Exception as e:
+                                    st.warning(f"Error processing a table: {str(e)}")
+                                    continue
+                            
+                            # Create result entry if we have all necessary information
+                            if draw_number and winning_numbers and len(winning_numbers) >= 6 and additional_number:
+                                # In case we found more than 6, keep only the first 6
+                                if len(winning_numbers) > 6:
+                                    winning_numbers = winning_numbers[:6]
+                                
+                                result = {
+                                    'draw_date': date,
+                                    'draw_number': draw_number,
+                                    'winning_numbers': winning_numbers,
+                                    'additional_number': additional_number,
+                                    **prize_data
+                                }
+                                results.append(result)
+                                st.success(f"Successfully processed draw #{draw_number} on {date} from specific URL")
+                                api_success = True
+                            else:
+                                st.warning(f"Could not extract complete data for {date} from the specific URL")
+                                st.info(f"Draw number: {draw_number}, Winning numbers: {winning_numbers}, Additional number: {additional_number}")
                         else:
-                            st.warning(f"Incomplete data from API for draw date {date}")
+                            st.warning(f"Failed to fetch from specific URL for {date}. Status code: {status}")
                     
                     except Exception as e:
-                        st.warning(f"Error processing API data for {date}: {str(e)}")
+                        st.warning(f"Error processing data for {date} from specific URL: {str(e)}")
+                else:
+                    st.info(f"No queryString found for date {date}, trying general API approach...")
+                    draw_data = get_draw_results_by_date(date)
+                    
+                    if draw_data:
+                        # Extract data from API response
+                        try:
+                            st.info(f"Processing API data for {date}...")
+                            
+                            # Different APIs might have different response structures, so we need to handle various formats
+                            # Extract draw number
+                            draw_number = None
+                            if 'drawNumber' in draw_data:
+                                draw_number = int(draw_data['drawNumber'])
+                            elif 'drawNo' in draw_data:
+                                draw_number = int(draw_data['drawNo'])
+                            
+                            # Extract winning numbers
+                            winning_numbers = []
+                            additional_number = None
+                            
+                            # Check different fields that might contain winning numbers
+                            if 'winningNumbers' in draw_data:
+                                if isinstance(draw_data['winningNumbers'], list):
+                                    winning_numbers = [int(num) for num in draw_data['winningNumbers']]
+                                elif isinstance(draw_data['winningNumbers'], str):
+                                    winning_numbers = [int(num) for num in draw_data['winningNumbers'].split(',')]
+                            
+                            # Check for additional number
+                            if 'additionalNumber' in draw_data:
+                                additional_number = int(draw_data['additionalNumber'])
+                            
+                            # Initialize prize data
+                            prize_data = {
+                                'group_1_winners': 0, 'group_1_prize': 0,
+                                'group_2_winners': 0, 'group_2_prize': 0,
+                                'group_3_winners': 0, 'group_3_prize': 0,
+                                'group_4_winners': 0, 'group_4_prize': 0,
+                                'group_5_winners': 0, 'group_5_prize': 0,
+                                'group_6_winners': 0, 'group_6_prize': 0,
+                                'group_7_winners': 0, 'group_7_prize': 0
+                            }
+                            
+                            # Extract prize information if available
+                            if 'prizes' in draw_data and isinstance(draw_data['prizes'], list):
+                                for prize in draw_data['prizes']:
+                                    if 'groupId' in prize and 'winners' in prize and 'prize' in prize:
+                                        group_id = int(prize['groupId'])
+                                        if 1 <= group_id <= 7:
+                                            prize_data[f'group_{group_id}_winners'] = int(prize['winners'])
+                                            # Prize might be a string with $ and commas
+                                            prize_amount = prize['prize']
+                                            if isinstance(prize_amount, str):
+                                                prize_amount = prize_amount.replace('$', '').replace(',', '')
+                                            prize_data[f'group_{group_id}_prize'] = float(prize_amount)
+                            
+                            # Create result entry
+                            if draw_number and winning_numbers and additional_number:
+                                result = {
+                                    'draw_date': date,
+                                    'draw_number': draw_number,
+                                    'winning_numbers': winning_numbers,
+                                    'additional_number': additional_number,
+                                    **prize_data
+                                }
+                                results.append(result)
+                                st.success(f"Successfully processed draw #{draw_number} on {date} from API")
+                                api_success = True
+                            else:
+                                st.warning(f"Incomplete data from API for draw date {date}")
+                        
+                        except Exception as e:
+                            st.warning(f"Error processing API data for {date}: {str(e)}")
         
-        # If API approach failed or wasn't used, fall back to web scraping
+        # If neither queryString nor API approach succeeded, fall back to general web scraping
         if not api_success:
-            st.info("Falling back to web scraping approach...")
+            st.info("Falling back to general web scraping approach...")
             url = "https://www.singaporepools.com.sg/en/product/sr/Pages/toto_results.aspx"
             
             st.info("Attempting to scrape TOTO results from website...")

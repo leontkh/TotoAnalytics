@@ -46,10 +46,10 @@ def get_missing_draw_dates(current_data):
     """
     # Get available draw dates from Singapore Pools API
     st.info("Fetching available draw dates from Singapore Pools API...")
-    available_dates = get_available_draw_dates()
+    date_to_query = get_available_draw_dates()
     
     # If API call failed, fall back to the old method
-    if not available_dates:
+    if not date_to_query:
         st.warning("Failed to get draw dates from API, falling back to calendar-based method...")
         # TOTO draws typically happen on Monday and Thursday
         # Here we'll construct a list of dates going back 3 months (90 days)
@@ -65,6 +65,9 @@ def get_missing_draw_dates(current_data):
             if current_date.weekday() == 0 or current_date.weekday() == 3:
                 available_dates.append(current_date.strftime('%Y-%m-%d'))
             current_date += timedelta(days=1)
+    else:
+        # Extract dates from the dictionary keys
+        available_dates = list(date_to_query.keys())
     
     # If we don't have any data yet, return all available dates
     if current_data is None or current_data.empty:
