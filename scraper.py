@@ -116,61 +116,121 @@ def find_query_str():
         pattern = r"queryString='([^']+)' value='([^']+)'"
         matches = re.findall(pattern, content)
         
-        for match in matches:
-            query_string = match[0]
-            option_text = match[1]
+        if matches:
+            print(f"Found {len(matches)} query strings with their option text")
             
-            # Try to extract date and draw number from option text
-            date_match = re.search(r'(\d{1,2}\s+[A-Za-z]+\s+\d{4})', option_text)
-            draw_match = re.search(r'Draw\s*(?:No\.?)?:?\s*#?(\d+)', option_text, re.IGNORECASE)
-            
-            draw_date = None
-            draw_number = None
-            
-            if date_match:
-                date_str = date_match.group(1)
-                try:
-                    # Try different date formats
-                    date_formats = ['%d %B %Y', '%d %b %Y']
-                    for fmt in date_formats:
+            for match in matches:
+                query_string = match[0]
+                option_text = match[1]
+                
+                # Try to extract date and draw number from option text
+                date_match = re.search(r'(\d{1,2}\s+[A-Za-z]+\s+\d{4})', option_text)
+                draw_match = re.search(r'Draw\s*(?:No\.?)?:?\s*#?(\d+)', option_text, re.IGNORECASE)
+                
+                draw_date = None
+                draw_number = None
+                
+                if date_match:
+                    date_str = date_match.group(1)
+                    try:
+                        # Try different date formats
+                        date_formats = ['%d %B %Y', '%d %b %Y']
+                        for fmt in date_formats:
+                            try:
+                                draw_date = datetime.strptime(date_str, fmt).strftime('%Y-%m-%d')
+                                break
+                            except ValueError:
+                                continue
+                    except Exception as e:
+                        print(f"Error parsing date from '{date_str}': {str(e)}")
+                
+                if draw_match:
+                    draw_number_str = draw_match.group(1)
+                    try:
+                        draw_number = int(draw_number_str)
+                    except ValueError:
+                        print(f"Error parsing draw number from '{draw_number_str}'")
+                
+                # Extract draw number from the query string itself as another fallback
+                if draw_number is None:
+                    # For query strings like "sppl=RHJhd051bWJlcj00MDY3"
+                    # This is a base64 encoded value. For "RHJhd051bWJlcj00MDY3", it decodes to "DrawNumber=4067"
+                    if query_string.startswith("sppl="):
                         try:
-                            draw_date = datetime.strptime(date_str, fmt).strftime('%Y-%m-%d')
-                            break
-                        except ValueError:
-                            continue
-                except Exception:
-                    pass
-            
-            if draw_match:
-                draw_number = draw_match.group(1)
-                try:
-                    draw_number = int(draw_number)
-                except ValueError:
-                    pass
-            
-            # Extract draw ID from query string as fallback for draw number
-            if draw_number is None and 'id=' in query_string:
-                try:
-                    draw_id = query_string.split('id=')[1].split('&')[0]
-                    if draw_id.isdigit():
-                        draw_number = int(draw_id)
-                except Exception:
-                    pass
-            
-            draw_info = {
-                'query_string': query_string,
-                'draw_date': draw_date,
-                'draw_number': draw_number
-            }
-            
-            draw_info_list.append(draw_info)
+                            encoded_part = query_string.split("=")[1]
+                            
+                            # Try to decode the base64 and extract the draw number
+                            try:
+                                import base64
+                                decoded = base64.b64decode(encoded_part).decode('utf-8')
+                                print(f"Decoded: {decoded}")
+                                
+                                # Extract the draw number from the decoded string (e.g., "DrawNumber=4067")
+                                number_match = re.search(r'=(\d+)', decoded)
+                                if number_match:
+                                    draw_number = int(number_match.group(1))
+                            except Exception as e:
+                                print(f"Failed to decode base64: {str(e)}")
+                                
+                            # If base64 decoding fails, try to extract number directly from the encoded string
+                            # as a fallback
+                            number_match = re.search(r'(\d+)$', encoded_part)
+                            if number_match:
+                                potential_draw_number = number_match.group(1)
+                                if potential_draw_number.isdigit():
+                                    draw_number = int(potential_draw_number)
+                        except Exception as e:
+                            print(f"Error extracting draw number from query string: {str(e)}")
+                
+                # As a last resort, try to extract from query string parameters
+                if draw_number is None and 'id=' in query_string:
+                    try:
+                        draw_id = query_string.split('id=')[1].split('&')[0]
+                        if draw_id.isdigit():
+                            draw_number = int(draw_id)
+                    except Exception:
+                        pass
+                        
+                # Create draw info dict and add to list
+                draw_info = {
+                    'query_string': query_string,
+                    'draw_date': draw_date,
+                    'draw_number': draw_number
+                }
+                
+                draw_info_list.append(draw_info)
     
     # If all else fails, just return query strings without dates (original functionality)
     if not draw_info_list:
         print("Falling back to original regex approach (query strings only)")
         pattern = r"queryString='(.{4}=.{20})' value='"
         query_strings = re.findall(pattern, content)
-        draw_info_list = [{'query_string': q, 'draw_date': None, 'draw_number': None} for q in query_strings]
+        
+        # Go through each query string and try to extract the draw number
+        for q in query_strings:
+            draw_number = None
+            if q.startswith("sppl="):
+                try:
+                    encoded_part = q.split("=")[1]
+                    import base64
+                    try:
+                        decoded = base64.b64decode(encoded_part).decode('utf-8')
+                        print(f"Decoded: {decoded}")
+                        
+                        # Extract draw number
+                        number_match = re.search(r'=(\d+)', decoded)
+                        if number_match:
+                            draw_number = int(number_match.group(1))
+                    except:
+                        pass
+                except:
+                    pass
+                
+            draw_info_list.append({
+                'query_string': q, 
+                'draw_date': None, 
+                'draw_number': draw_number
+            })
     
     print(f"Found {len(draw_info_list)} query strings with draw information")
     return draw_info_list
