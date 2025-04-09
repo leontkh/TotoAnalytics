@@ -160,10 +160,10 @@ def scrape_toto_results(dates_to_scrape=None):
         # Look for the table that contains the winning numbers
         winning_numbers_header = soup.find(string=re.compile("Winning Numbers", re.IGNORECASE))
         if winning_numbers_header:
-            # Find the table near this header
+            # Find the table by going up the DOM tree
             parent = winning_numbers_header.parent
             while parent and parent.name != 'table':
-                parent = parent.find_next('table')
+                parent = parent.parent
             
             if parent and parent.name == 'table':
                 # Extract numbers from this table
@@ -172,20 +172,38 @@ def scrape_toto_results(dates_to_scrape=None):
                     if cell_text.isdigit() and 1 <= int(cell_text) <= 49:  # TOTO numbers are 1-49
                         winning_numbers.append(int(cell_text))
         
-        # Look for additional number
-        additional_header = soup.find(string=re.compile("Additional Number", re.IGNORECASE))
-        if additional_header:
-            # Find closest table
-            parent = additional_header.parent
-            while parent and parent.name != 'table':
-                parent = parent.find_next('table')
-            
-            if parent and parent.name == 'table':
-                for cell in parent.find_all(['td', 'th']):
+        # If still no winning numbers, try to find them by looking at all tables
+        if not winning_numbers:
+            for table in all_tables:
+                # Look for a table with digits 1-49 in its cells
+                potential_numbers = []
+                for cell in table.find_all(['td', 'th']):
                     cell_text = cell.get_text(strip=True)
                     if cell_text.isdigit() and 1 <= int(cell_text) <= 49:
-                        additional_number = int(cell_text)
-                        break
+                        potential_numbers.append(int(cell_text))
+                
+                # If we found a table with 6 or 7 numbers, that's likely our winning numbers
+                if 6 <= len(potential_numbers) <= 7:
+                    winning_numbers = potential_numbers[:6]
+                    if len(potential_numbers) == 7:
+                        additional_number = potential_numbers[6]
+                    break
+        
+        # Look for additional number
+        if additional_number is None:
+            additional_header = soup.find(string=re.compile("Additional Number", re.IGNORECASE))
+            if additional_header:
+                # Find closest table by going up the DOM tree
+                parent = additional_header.parent
+                while parent and parent.name != 'table':
+                    parent = parent.parent
+                
+                if parent and parent.name == 'table':
+                    for cell in parent.find_all(['td', 'th']):
+                        cell_text = cell.get_text(strip=True)
+                        if cell_text.isdigit() and 1 <= int(cell_text) <= 49:
+                            additional_number = int(cell_text)
+                            break
         
         # If we didn't find winning numbers through tables, try an alternative approach
         # Look for numbers in the sequence of cells that could be winning numbers
