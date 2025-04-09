@@ -9,8 +9,16 @@ import io
 from io import StringIO
 
 def find_query_str():
+    """
+    Fetch and extract TOTO result query strings and corresponding dates from Singapore Pools website
+    
+    Returns:
+        A list of dictionaries, each containing:
+        - query_string: The query string to use with scrape_toto_results
+        - draw_date: The date of the draw in YYYY-MM-DD format
+        - draw_number: The draw number (if available)
+    """
     url = "https://www.singaporepools.com.sg/DataFileArchive/Lottery/Output/toto_result_draw_list_en.html"
-
 
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -21,17 +29,151 @@ def find_query_str():
         'Referer': 'https://www.singaporepools.com.sg/en/Pages/Home.aspx',
     }
 
-
+    print("Fetching TOTO result query strings...")
+    
     # Disable SSL verification
     response = requests.get(url, headers=headers, verify=False)
-
-    if response.status_code == 200:
-
-        # Try to parse as JSON
-        str_dates = response.text
-        pattern="queryString='(.{4}=.{20})' value='"
-        list_query_str = re.findall(pattern, str_dates)
-    return list_query_str
+    
+    if response.status_code != 200:
+        print(f"Failed to fetch query strings (HTTP {response.status_code})")
+        return []
+    
+    # Parse the HTML content
+    content = response.text
+    soup = BeautifulSoup(content, 'html.parser')
+    
+    # Find all options in the HTML that contain query strings
+    draw_info_list = []
+    
+    # Look for select elements that might contain the draw options
+    select_elements = soup.find_all('select')
+    
+    for select in select_elements:
+        options = select.find_all('option')
+        
+        for option in options:
+            if 'queryString' in str(option):
+                # Extract the query string using regex
+                query_match = re.search(r"queryString='([^']+)'", str(option))
+                
+                if query_match:
+                    query_string = query_match.group(1)
+                    
+                    # Extract the draw date and number from the option text
+                    option_text = option.get_text(strip=True)
+                    
+                    # Try to extract date and draw number from option text
+                    date_match = re.search(r'(\d{1,2}\s+[A-Za-z]+\s+\d{4})', option_text)
+                    draw_match = re.search(r'Draw\s*(?:No\.?)?:?\s*#?(\d+)', option_text, re.IGNORECASE)
+                    
+                    draw_date = None
+                    draw_number = None
+                    
+                    # Parse the date if found
+                    if date_match:
+                        date_str = date_match.group(1)
+                        try:
+                            # Try different date formats
+                            date_formats = ['%d %B %Y', '%d %b %Y']
+                            for fmt in date_formats:
+                                try:
+                                    draw_date = datetime.strptime(date_str, fmt).strftime('%Y-%m-%d')
+                                    break
+                                except ValueError:
+                                    continue
+                        except Exception as e:
+                            print(f"Error parsing date {date_str}: {str(e)}")
+                    
+                    # Parse the draw number if found
+                    if draw_match:
+                        draw_number = draw_match.group(1)
+                        try:
+                            draw_number = int(draw_number)
+                        except ValueError:
+                            print(f"Error parsing draw number {draw_number}")
+                    
+                    # Extract draw ID from query string as fallback for draw number
+                    if draw_number is None and 'id=' in query_string:
+                        try:
+                            draw_id = query_string.split('id=')[1].split('&')[0]
+                            if draw_id.isdigit():
+                                draw_number = int(draw_id)
+                        except Exception:
+                            pass
+                    
+                    # Add the info to our list
+                    draw_info = {
+                        'query_string': query_string,
+                        'draw_date': draw_date,
+                        'draw_number': draw_number
+                    }
+                    
+                    draw_info_list.append(draw_info)
+    
+    if not draw_info_list:
+        # Fallback to just extracting query strings if the above method fails
+        print("Couldn't find draw info using the HTML parser, falling back to regex-only approach")
+        pattern = r"queryString='([^']+)' value='([^']+)'"
+        matches = re.findall(pattern, content)
+        
+        for match in matches:
+            query_string = match[0]
+            option_text = match[1]
+            
+            # Try to extract date and draw number from option text
+            date_match = re.search(r'(\d{1,2}\s+[A-Za-z]+\s+\d{4})', option_text)
+            draw_match = re.search(r'Draw\s*(?:No\.?)?:?\s*#?(\d+)', option_text, re.IGNORECASE)
+            
+            draw_date = None
+            draw_number = None
+            
+            if date_match:
+                date_str = date_match.group(1)
+                try:
+                    # Try different date formats
+                    date_formats = ['%d %B %Y', '%d %b %Y']
+                    for fmt in date_formats:
+                        try:
+                            draw_date = datetime.strptime(date_str, fmt).strftime('%Y-%m-%d')
+                            break
+                        except ValueError:
+                            continue
+                except Exception:
+                    pass
+            
+            if draw_match:
+                draw_number = draw_match.group(1)
+                try:
+                    draw_number = int(draw_number)
+                except ValueError:
+                    pass
+            
+            # Extract draw ID from query string as fallback for draw number
+            if draw_number is None and 'id=' in query_string:
+                try:
+                    draw_id = query_string.split('id=')[1].split('&')[0]
+                    if draw_id.isdigit():
+                        draw_number = int(draw_id)
+                except Exception:
+                    pass
+            
+            draw_info = {
+                'query_string': query_string,
+                'draw_date': draw_date,
+                'draw_number': draw_number
+            }
+            
+            draw_info_list.append(draw_info)
+    
+    # If all else fails, just return query strings without dates (original functionality)
+    if not draw_info_list:
+        print("Falling back to original regex approach (query strings only)")
+        pattern = r"queryString='(.{4}=.{20})' value='"
+        query_strings = re.findall(pattern, content)
+        draw_info_list = [{'query_string': q, 'draw_date': None, 'draw_number': None} for q in query_strings]
+    
+    print(f"Found {len(draw_info_list)} query strings with draw information")
+    return draw_info_list
 
 def scrape_toto_results(query_str=None):
     """

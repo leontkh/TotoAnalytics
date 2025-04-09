@@ -47,45 +47,66 @@ def get_missing_query_strings(current_data=None):
     """
     # Step 1: Get all available query strings from the Singapore Pools website
     st.info("Fetching available query strings from Singapore Pools website...")
-    all_query_strings = find_query_str()
+    all_draw_info = find_query_str()
     
-    if not all_query_strings:
+    if not all_draw_info:
         st.warning("Failed to get query strings, will return empty list")
         return []
     
-    st.success(f"Found {len(all_query_strings)} total query strings from the website")
+    st.success(f"Found {len(all_draw_info)} total query strings from the website")
     
     # Step 2: If we don't have any existing data, return all query strings
     if current_data is None or current_data.empty:
         st.info("No existing data, will fetch all query strings")
-        return all_query_strings
+        return [info['query_string'] for info in all_draw_info]
     
     # Step 3: Filter out query strings for draws we already have in the database
     # Extract draw numbers from the database
-    existing_draw_numbers = set(current_data['draw_number'].astype(str).tolist())
+    existing_draw_numbers = set(current_data['draw_number'].astype(int).tolist())
     
     # Filter out query strings for draws we already have
     missing_query_strings = []
     
-    for query_string in all_query_strings:
-        # Extract draw number from query string (format usually contains draw_id=XXXX)
-        try:
-            # Example query string format: "/?page=toto-results&id=XXXX" or similar
-            # Try to extract the ID from the query string
-            if "id=" in query_string:
-                draw_id = query_string.split("id=")[1].split("&")[0]
-                
-                # Check if this draw is already in our database
-                if draw_id not in existing_draw_numbers:
-                    missing_query_strings.append(query_string)
-            else:
-                # If we can't extract the ID, include it to be safe
+    # Display some debug info
+    st.write(f"Database contains {len(existing_draw_numbers)} unique draw numbers")
+    st.write(f"Earliest draw: {min(existing_draw_numbers)}, Latest draw: {max(existing_draw_numbers)}")
+    
+    # Keep track of how many were filtered due to existing in the database
+    filtered_count = 0
+    unmatched_count = 0
+    
+    for draw_info in all_draw_info:
+        query_string = draw_info['query_string']
+        draw_number = draw_info['draw_number']
+        draw_date = draw_info['draw_date']
+        
+        if draw_number is not None:
+            # We have a draw number, check if it's in our database
+            if draw_number not in existing_draw_numbers:
                 missing_query_strings.append(query_string)
-        except Exception:
-            # If parsing fails, include it to be safe
-            missing_query_strings.append(query_string)
+            else:
+                filtered_count += 1
+        else:
+            # No draw number available, try to extract it from query string
+            try:
+                if "id=" in query_string:
+                    draw_id = query_string.split("id=")[1].split("&")[0]
+                    if draw_id.isdigit() and int(draw_id) not in existing_draw_numbers:
+                        missing_query_strings.append(query_string)
+                    else:
+                        filtered_count += 1
+                else:
+                    # If we can't determine the draw number, include it to be safe
+                    missing_query_strings.append(query_string)
+                    unmatched_count += 1
+            except Exception:
+                # If parsing fails, include it to be safe
+                missing_query_strings.append(query_string)
+                unmatched_count += 1
     
     st.info(f"Found {len(missing_query_strings)} query strings for draws not in the database")
+    st.write(f"Filtered out {filtered_count} draws already in database, included {unmatched_count} draws with unmatched IDs")
+    
     return missing_query_strings
 
 def get_missing_draw_dates(current_data):
