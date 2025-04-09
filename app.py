@@ -48,7 +48,7 @@ if update_data:
             # Scrape missing draw data
             new_data = scrape_toto_results(missing_dates)
             
-            if new_data:
+            if new_data is not None and not new_data.empty:
                 # Calculate prize pools for new data
                 new_data_with_pools = calculate_prize_pools(new_data)
                 
