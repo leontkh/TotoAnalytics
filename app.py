@@ -18,6 +18,7 @@ from db_utils import (
     migrate_from_pickle,
     test_connection,
     debug_database,
+    check_database_state,
     engine,
     toto_results,
     select
@@ -66,33 +67,45 @@ if debug_btn:
         # Run the debug function (outputs to console)
         debug_database()
         
-        # Check connection
-        db_success, db_message = test_connection()
-        st.write(f"Database connection: {'✅ Success' if db_success else '❌ Failed'}")
-        st.write(f"Message: {db_message}")
+        # Get database state
+        db_state = check_database_state()
         
-        # Check if table exists
-        try:
-            with engine.connect() as connection:
-                exists = engine.dialect.has_table(connection, 'toto_results')
-                st.write(f"Table 'toto_results' exists: {exists}")
-                
-                if exists:
-                    # Check table contents
-                    query = select([toto_results])
-                    result = connection.execute(query).fetchall()
-                    st.write(f"Number of records in database: {len(result)}")
-                    
-                    if len(result) > 0:
-                        st.write("Sample record (first row):")
-                        st.json({column: str(value) for column, value in zip(result[0].keys(), result[0])})
-        except Exception as e:
-            st.error(f"Error checking database: {str(e)}")
-
+        # Display in nice UI
+        st.write(f"Database connection: {'✅ Success' if db_state['connection']['success'] else '❌ Failed'}")
+        st.write(f"Message: {db_state['connection']['message']}")
+        st.write(f"Table 'toto_results' exists: {'✅ Yes' if db_state['table_exists'] else '❌ No'}")
+        
+        if db_state['table_exists']:
+            st.write(f"Number of records in database: {db_state['record_count']}")
+            
+            if db_state['sample_record']:
+                st.write("Sample record (first row):")
+                st.json(db_state['sample_record'])
+        
         # Try to initialize database if needed
-        st.write("Attempting to initialize database...")
-        success = initialize_database(silent=False)
-        st.write(f"Database initialization: {'✅ Success' if success else '❌ Failed'}")
+        if not db_state['table_exists'] or db_state['record_count'] == 0:
+            st.write("Attempting to initialize database...")
+            success = initialize_database(silent=False)
+            st.write(f"Database initialization: {'✅ Success' if success else '❌ Failed'}")
+            
+            # Check if database is loaded in memory
+            if st.session_state.toto_data is not None:
+                st.write(f"Data loaded in memory: {len(st.session_state.toto_data)} records")
+                
+                if len(st.session_state.toto_data) > 0 and db_state['record_count'] == 0:
+                    st.warning("Data exists in memory but not in database. Attempting to save...")
+                    
+                    # Try to save the data
+                    try:
+                        save_success = save_database(st.session_state.toto_data)
+                        if save_success:
+                            st.success(f"Successfully saved {len(st.session_state.toto_data)} records to database")
+                        else:
+                            st.error("Failed to save data to database")
+                    except Exception as e:
+                        st.error(f"Error saving data: {str(e)}")
+            else:
+                st.warning("No data loaded in memory")
 
 if update_data:
     with st.spinner("Updating database with latest TOTO results..."):

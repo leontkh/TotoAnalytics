@@ -75,19 +75,24 @@ def load_database():
     """
     try:
         # Check if the table exists
-        if not engine.dialect.has_table(engine.connect(), 'toto_results'):
-            st.warning("Database table doesn't exist yet. Will create it.")
-            initialize_database()
-            return None
+        with engine.connect() as connection:
+            if not engine.dialect.has_table(connection, 'toto_results'):
+                print("Database table doesn't exist yet. Initializing...")
+                st.warning("Database table doesn't exist yet. Will create it.")
+                initialize_database()
+                return None
+        
+        print("Database table exists, querying records...")
         
         # Query all records from toto_results table
-        query = select([toto_results])
-        result = engine.connect().execute(query)
-        
-        # Convert to DataFrame
-        df = pd.DataFrame(result.fetchall(), columns=result.keys())
+        query = select(toto_results)
+        with engine.connect() as connection:
+            result = connection.execute(query)
+            # Convert to DataFrame
+            df = pd.DataFrame(result.fetchall(), columns=result.keys())
         
         if df.empty:
+            print("Database is empty")
             st.info("Database is empty")
             return None
         
@@ -95,10 +100,12 @@ def load_database():
         if 'draw_date' in df.columns:
             df['draw_date'] = pd.to_datetime(df['draw_date'])
         
+        print(f"Successfully loaded {len(df)} records from database")
         st.success(f"Loaded {len(df)} records from database")
         return df
         
     except Exception as e:
+        print(f"Error loading database: {str(e)}")
         st.error(f"Error loading database: {str(e)}")
         return None
 
@@ -184,7 +191,7 @@ def save_database(df):
                     print(f"Processing record for draw #{record['draw_number']}")
                     
                     # Check if record already exists
-                    query = select([toto_results]).where(toto_results.c.draw_number == record['draw_number'])
+                    query = select(toto_results).where(toto_results.c.draw_number == record['draw_number'])
                     result = connection.execute(query).fetchone()
                     
                     if not result:
@@ -267,27 +274,68 @@ def test_connection():
     except Exception as e:
         return False, f"Failed to connect to PostgreSQL database: {str(e)}"
 
-def debug_database():
-    """Debug function to check database state"""
+def check_database_state():
+    """
+    Check database state and return information about the connection, table, and records
+    
+    Returns:
+        Dictionary containing database state information
+    """
+    state = {
+        'connection': {
+            'success': False,
+            'message': ''
+        },
+        'table_exists': False,
+        'record_count': 0,
+        'sample_record': None
+    }
+    
     try:
         # Check if connection works
         success, message = test_connection()
-        print(f"Database connection: {success}, Message: {message}")
+        state['connection']['success'] = success
+        state['connection']['message'] = message
         
+        if not success:
+            return state
+            
         # Check if the table exists
         with engine.connect() as connection:
             exists = engine.dialect.has_table(connection, 'toto_results')
-            print(f"Table 'toto_results' exists: {exists}")
+            state['table_exists'] = exists
             
             if exists:
                 # Check table contents
-                query = select([toto_results])
+                query = select(toto_results)
                 result = connection.execute(query).fetchall()
-                print(f"Number of records in database: {len(result)}")
+                state['record_count'] = len(result)
                 
                 if len(result) > 0:
-                    # Print a sample record
-                    print(f"Sample record (first row): {result[0]}")
+                    # Get a sample record
+                    state['sample_record'] = {column: str(value) for column, value in zip(result[0].keys(), result[0])}
+        
+        return state
+    except Exception as e:
+        print(f"Error checking database state: {str(e)}")
+        state['connection']['message'] = f"Error: {str(e)}"
+        return state
+
+def debug_database():
+    """Debug function to check database state and print to console"""
+    try:
+        # Check database state
+        state = check_database_state()
+        
+        # Print state information
+        print(f"Database connection: {state['connection']['success']}, Message: {state['connection']['message']}")
+        print(f"Table 'toto_results' exists: {state['table_exists']}")
+        
+        if state['table_exists']:
+            print(f"Number of records in database: {state['record_count']}")
+            
+            if state['sample_record']:
+                print(f"Sample record (first row): {state['sample_record']}")
         
         return True
     except Exception as e:
