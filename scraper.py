@@ -25,26 +25,75 @@ def scrape_toto_results(dates_to_scrape=None):
     try:
         st.info("Attempting to scrape TOTO results...")
         
-        # Use a modern browser user agent
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
+        # Try different approaches to get the content
+        st.info("Trying multiple approaches to download the page...")
         
+        html_content = None
+        error_messages = []
+        
+        # Approach 1: Standard requests with basic headers
         try:
-            # First download with requests
+            st.info("Trying with basic headers...")
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
             response = requests.get(url, headers=headers)
-            response.raise_for_status()
-            html_content = response.text
-            st.info(f"Downloaded {len(html_content)} bytes with requests")
+            status = response.status_code
+            st.info(f"Response status code: {status}")
+            
+            if status == 200:
+                html_content = response.text
+                st.info(f"Success! Downloaded {len(html_content)} bytes")
+            else:
+                error_messages.append(f"Basic headers approach failed with status {status}")
         except Exception as e:
-            st.error(f"Error downloading with requests: {str(e)}")
-            # Try trafilatura as fallback
-            downloaded = trafilatura.fetch_url(url)
-            if not downloaded:
-                st.error("Failed to download the page content.")
-                return pd.DataFrame()
-            html_content = downloaded
-            st.info(f"Downloaded {len(html_content)} bytes with trafilatura")
+            error_messages.append(f"Basic headers approach failed with error: {str(e)}")
+        
+        # Approach 2: More complete browser headers
+        if not html_content:
+            try:
+                st.info("Trying with complete browser headers...")
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                    'Cache-Control': 'max-age=0',
+                    'Referer': 'https://www.singaporepools.com.sg/en/Pages/Home.aspx',
+                }
+                response = requests.get(url, headers=headers)
+                status = response.status_code
+                st.info(f"Response status code: {status}")
+                
+                if status == 200:
+                    html_content = response.text
+                    st.info(f"Success! Downloaded {len(html_content)} bytes")
+                else:
+                    error_messages.append(f"Complete headers approach failed with status {status}")
+            except Exception as e:
+                error_messages.append(f"Complete headers approach failed with error: {str(e)}")
+        
+        # Approach 3: Try using trafilatura as a fallback
+        if not html_content:
+            try:
+                st.info("Trying with trafilatura...")
+                downloaded = trafilatura.fetch_url(url)
+                if downloaded:
+                    html_content = downloaded
+                    st.info(f"Success! Downloaded {len(html_content)} bytes with trafilatura")
+                else:
+                    error_messages.append("Trafilatura approach failed to download content")
+            except Exception as e:
+                error_messages.append(f"Trafilatura approach failed with error: {str(e)}")
+        
+        # Check if we got content
+        if not html_content:
+            st.error("All download approaches failed to get content from Singapore Pools website")
+            for i, error in enumerate(error_messages):
+                st.error(f"{i+1}. {error}")
+            return pd.DataFrame()
         
         # Parse with BeautifulSoup
         soup = BeautifulSoup(html_content, 'html.parser')
@@ -58,12 +107,13 @@ def scrape_toto_results(dates_to_scrape=None):
         
         # Look for draw date in the page
         date_pattern = re.compile(r'\d{1,2}\s+[A-Za-z]+\s+\d{4}')
-        date_elements = soup.find_all(string=date_pattern)
+        date_elements = soup.find_all(string=lambda text: bool(text and date_pattern.search(str(text))))
         
         if date_elements:
             for element in date_elements:
-                if 'CDATA' not in element:  # Skip script elements
-                    draw_date_str = re.search(date_pattern, element).group(0)
+                element_str = str(element)
+                if 'CDATA' not in element_str:  # Skip script elements
+                    draw_date_str = re.search(date_pattern, element_str).group(0)
                     try:
                         draw_date = datetime.strptime(draw_date_str, '%d %B %Y').strftime('%Y-%m-%d')
                         draw_info['draw_date'] = draw_date
@@ -80,11 +130,12 @@ def scrape_toto_results(dates_to_scrape=None):
         
         # Look for draw number
         draw_pattern = re.compile(r'Draw No\.?\s*(\d+)', re.IGNORECASE)
-        draw_elements = soup.find_all(string=lambda text: bool(text and draw_pattern.search(text)))
+        draw_elements = soup.find_all(string=lambda text: bool(text and draw_pattern.search(str(text))))
         
         if draw_elements:
             for element in draw_elements:
-                match = draw_pattern.search(element)
+                element_str = str(element)
+                match = draw_pattern.search(element_str)
                 if match:
                     draw_number = match.group(1)
                     draw_info['draw_number'] = int(draw_number)
