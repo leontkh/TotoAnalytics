@@ -3,7 +3,7 @@ import pandas as pd
 import os
 import datetime
 from scraper import scrape_toto_results
-from data_utils import load_database, save_database, get_missing_draw_dates
+from data_utils import load_database, save_database, get_missing_draw_dates, get_missing_query_strings
 from calculator import calculate_prize_pools
 from visualization import (
     plot_winning_numbers_frequency,
@@ -39,35 +39,45 @@ update_data = st.sidebar.button("Update Database")
 
 if update_data:
     with st.spinner("Updating database with latest TOTO results..."):
-        # Get missing draw dates
-        st.write("Checking for missing draw dates...")
+        # Get query strings for missing draws
+        st.write("Fetching available query strings...")
         
         if st.session_state.toto_data is not None:
             st.write(f"Current database has {len(st.session_state.toto_data)} entries")
         else:
             st.write("No existing database found, will create new one")
             
-        missing_dates = get_missing_draw_dates(st.session_state.toto_data)
+        query_strings = get_missing_query_strings()
         
-        if missing_dates:
-            st.info(f"Found {len(missing_dates)} missing draw dates. Scraping data...")
-            # Just to confirm the missing dates in UI
-            if len(missing_dates) > 5:
-                st.write(f"Missing dates: {missing_dates[:5]} and {len(missing_dates)-5} more...")
+        if query_strings:
+            st.info(f"Found {len(query_strings)} query strings to process. Scraping data...")
+            # Just to confirm the query strings in UI
+            if len(query_strings) > 5:
+                st.write(f"Query strings to process: {query_strings[:5]} and {len(query_strings)-5} more...")
             else:
-                st.write(f"Missing dates: {missing_dates}")
+                st.write(f"Query strings to process: {query_strings}")
                 
-            # Limit to a smaller batch for testing/debugging
-            max_dates_per_batch = 10
-            batch_missing_dates = missing_dates[:max_dates_per_batch]
-            st.write(f"Processing batch of {len(batch_missing_dates)} dates: {batch_missing_dates}")
+            # Process each query string one by one
+            results_dataframes = []
             
-            # Scrape missing draw data
-            st.write("Starting scraper...")
-            new_data = scrape_toto_results(batch_missing_dates)
+            for i, query_string in enumerate(query_strings[:5]):  # Process first 5 for testing
+                st.write(f"Processing query string {i+1}/{min(5, len(query_strings))}: {query_string}")
+                
+                # Scrape TOTO results using the query string
+                st.write("Starting scraper...")
+                single_draw_data = scrape_toto_results(query_string)
+                
+                if single_draw_data is not None and not single_draw_data.empty:
+                    st.write(f"Successfully scraped draw with query string: {query_string}")
+                    st.write(f"DataFrame shape: {single_draw_data.shape}")
+                    results_dataframes.append(single_draw_data)
+                else:
+                    st.warning(f"Failed to scrape data for query string: {query_string}")
             
-            if new_data is not None:
-                st.write(f"Scraper returned DataFrame with shape: {new_data.shape}")
+            # Combine all dataframes
+            if results_dataframes:
+                new_data = pd.concat(results_dataframes, ignore_index=True)
+                st.write(f"Combined {len(results_dataframes)} draws into a DataFrame with shape: {new_data.shape}")
                 
                 if not new_data.empty:
                     # Calculate prize pools for new data
@@ -97,11 +107,39 @@ if update_data:
                         import traceback
                         st.code(traceback.format_exc())
                 else:
-                    st.error("Scraper returned an empty DataFrame.")
+                    st.error("Combined DataFrame is empty.")
             else:
-                st.error("Scraper returned None instead of a DataFrame.")
+                st.error("Failed to scrape any data from the provided query strings.")
         else:
-            st.success("Database is already up to date!")
+            st.warning("No query strings found. Unable to fetch new data.")
+            
+            # As a fallback, try to fetch the latest draw
+            st.info("Trying to fetch the latest draw as a fallback...")
+            latest_draw = scrape_toto_results(None)  # None will fetch the latest draw
+            
+            if latest_draw is not None and not latest_draw.empty:
+                st.success("Successfully fetched the latest draw.")
+                
+                # Calculate prize pools
+                try:
+                    latest_draw_with_pools = calculate_prize_pools(latest_draw)
+                    
+                    # Merge with existing data
+                    if st.session_state.toto_data is not None:
+                        combined_data = pd.concat([st.session_state.toto_data, latest_draw_with_pools], ignore_index=True)
+                        combined_data = combined_data.drop_duplicates(subset=['draw_date', 'draw_number'], keep='last')
+                    else:
+                        combined_data = latest_draw_with_pools
+                    
+                    # Save the data
+                    st.session_state.toto_data = combined_data
+                    save_database(combined_data)
+                    st.session_state.last_updated = datetime.datetime.now()
+                    st.success("Database updated with the latest draw.")
+                except Exception as e:
+                    st.error(f"Error processing latest draw: {str(e)}")
+            else:
+                st.error("Failed to fetch the latest draw. Database remains unchanged.")
     
     # Use st.rerun to refresh the page after update
     st.rerun()
