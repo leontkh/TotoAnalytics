@@ -90,17 +90,48 @@ def get_missing_query_strings(current_data=None):
             # No draw number available, try to extract it from query string
             try:
                 if "id=" in query_string:
+                    # Try to extract draw ID from id= parameter
                     draw_id = query_string.split("id=")[1].split("&")[0]
                     if draw_id.isdigit() and int(draw_id) not in existing_draw_numbers:
                         missing_query_strings.append(query_string)
                     else:
                         filtered_count += 1
+                elif query_string.startswith("sppl="):
+                    # This is likely a base64 encoded string for draw number
+                    try:
+                        import base64
+                        encoded_part = query_string.split("=")[1]
+                        decoded = base64.b64decode(encoded_part).decode('utf-8')
+                        
+                        # Try to extract the draw number from the decoded string
+                        import re
+                        number_match = re.search(r'=(\d+)', decoded)
+                        if number_match:
+                            extracted_draw_number = int(number_match.group(1))
+                            
+                            # Check if this draw is already in our database
+                            if extracted_draw_number not in existing_draw_numbers:
+                                missing_query_strings.append(query_string)
+                                st.write(f"Adding draw #{extracted_draw_number} to fetch queue")
+                            else:
+                                filtered_count += 1
+                                st.write(f"Skipping draw #{extracted_draw_number} (already in database)")
+                        else:
+                            # Couldn't extract draw number from base64, include to be safe
+                            missing_query_strings.append(query_string)
+                            unmatched_count += 1
+                    except Exception as e:
+                        # If base64 decoding fails, include to be safe
+                        st.write(f"Failed to decode base64: {str(e)}")
+                        missing_query_strings.append(query_string)
+                        unmatched_count += 1
                 else:
                     # If we can't determine the draw number, include it to be safe
                     missing_query_strings.append(query_string)
                     unmatched_count += 1
-            except Exception:
+            except Exception as e:
                 # If parsing fails, include it to be safe
+                st.write(f"Error processing query string: {str(e)}")
                 missing_query_strings.append(query_string)
                 unmatched_count += 1
     
