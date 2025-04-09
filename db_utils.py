@@ -45,17 +45,25 @@ toto_results = Table(
     Column('query_string', String)
 )
 
-def initialize_database():
+def initialize_database(silent=True):
     """
     Initialize the database by creating tables if they don't exist
+    
+    Args:
+        silent: If True, don't display success/error messages
+    
+    Returns:
+        True if successful, False otherwise
     """
     try:
         # Create tables
         metadata.create_all(engine)
-        st.success("Database initialized successfully")
+        if not silent:
+            st.success("Database initialized successfully")
         return True
     except Exception as e:
-        st.error(f"Error initializing database: {str(e)}")
+        if not silent:
+            st.error(f"Error initializing database: {str(e)}")
         return False
 
 def load_database():

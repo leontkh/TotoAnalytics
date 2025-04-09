@@ -40,37 +40,17 @@ This application scrapes Singapore Pools TOTO results, calculates prize pools,
 and provides analytics on historical data.
 """)
 
-# Check database connection
-db_success, db_message = test_connection()
-if db_success:
-    st.sidebar.success("✅ PostgreSQL Database Connected")
-else:
-    st.sidebar.error("❌ Database Connection Failed")
-    st.sidebar.info("Please initialize the database using the button below")
+# Check database connection and initialize if needed
+if not 'db_initialized' in st.session_state:
+    db_success, db_message = test_connection()
+    if not db_success:
+        # Only initialize if connection failed and not already tried
+        initialize_database()
+    st.session_state.db_initialized = True
 
 # Sidebar
 st.sidebar.title("Controls")
 update_data = st.sidebar.button("Update Database")
-
-# Add a section for database initialization
-st.sidebar.title("Database Operations")
-initialize_db = st.sidebar.button("Initialize Database")
-migrate_data = st.sidebar.button("Migrate from Pickle to PostgreSQL")
-
-if initialize_db:
-    success = initialize_database()
-    if success:
-        st.success("Database initialized successfully!")
-        st.rerun()
-        
-if migrate_data:
-    with st.spinner("Migrating data from pickle file to PostgreSQL database..."):
-        success = migrate_from_pickle()
-        if success:
-            st.success("Data migrated successfully from pickle to PostgreSQL!")
-            st.session_state.toto_data = load_database()
-            st.session_state.last_updated = datetime.datetime.now()
-            st.rerun()
 
 if update_data:
     with st.spinner("Updating database with latest TOTO results..."):
