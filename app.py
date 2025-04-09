@@ -40,31 +40,57 @@ update_data = st.sidebar.button("Update Database")
 if update_data:
     with st.spinner("Updating database with latest TOTO results..."):
         # Get missing draw dates
+        st.write("Checking for missing draw dates...")
+        
+        if st.session_state.toto_data is not None:
+            st.write(f"Current database has {len(st.session_state.toto_data)} entries")
+        else:
+            st.write("No existing database found, will create new one")
+            
         missing_dates = get_missing_draw_dates(st.session_state.toto_data)
         
         if missing_dates:
             st.info(f"Found {len(missing_dates)} missing draw dates. Scraping data...")
+            st.write(f"Missing dates: {missing_dates[:5]}...")
             
             # Scrape missing draw data
+            st.write("Starting scraper...")
             new_data = scrape_toto_results(missing_dates)
             
-            if new_data is not None and not new_data.empty:
-                # Calculate prize pools for new data
-                new_data_with_pools = calculate_prize_pools(new_data)
+            if new_data is not None:
+                st.write(f"Scraper returned DataFrame with shape: {new_data.shape}")
                 
-                # Merge with existing data
-                if st.session_state.toto_data is not None:
-                    combined_data = pd.concat([st.session_state.toto_data, new_data_with_pools], ignore_index=True)
-                    combined_data = combined_data.drop_duplicates(subset=['draw_date', 'draw_number'], keep='last')
+                if not new_data.empty:
+                    # Calculate prize pools for new data
+                    st.write("Calculating prize pools...")
+                    try:
+                        new_data_with_pools = calculate_prize_pools(new_data)
+                        st.write(f"Prize pool calculation completed. Shape: {new_data_with_pools.shape}")
+                        
+                        # Merge with existing data
+                        if st.session_state.toto_data is not None:
+                            st.write("Merging with existing data...")
+                            combined_data = pd.concat([st.session_state.toto_data, new_data_with_pools], ignore_index=True)
+                            combined_data = combined_data.drop_duplicates(subset=['draw_date', 'draw_number'], keep='last')
+                        else:
+                            combined_data = new_data_with_pools
+                        
+                        st.write(f"Final database shape: {combined_data.shape}")
+                        
+                        # Save the data
+                        st.write("Saving database...")
+                        st.session_state.toto_data = combined_data
+                        save_database(combined_data)
+                        st.session_state.last_updated = datetime.datetime.now()
+                        st.success(f"Database updated with {len(new_data)} new draw results.")
+                    except Exception as e:
+                        st.error(f"Error during prize pool calculation or data saving: {str(e)}")
+                        import traceback
+                        st.code(traceback.format_exc())
                 else:
-                    combined_data = new_data_with_pools
-                
-                st.session_state.toto_data = combined_data
-                save_database(combined_data)
-                st.session_state.last_updated = datetime.datetime.now()
-                st.success(f"Database updated with {len(new_data)} new draw results.")
+                    st.error("Scraper returned an empty DataFrame.")
             else:
-                st.error("Failed to scrape new data. Please try again later.")
+                st.error("Scraper returned None instead of a DataFrame.")
         else:
             st.success("Database is already up to date!")
     
