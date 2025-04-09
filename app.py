@@ -45,10 +45,15 @@ if update_data:
         
         if st.session_state.toto_data is not None:
             st.write(f"Current database has {len(st.session_state.toto_data)} entries")
+            # Display the oldest and newest draws in the database
+            oldest_date = st.session_state.toto_data['draw_date'].min()
+            newest_date = st.session_state.toto_data['draw_date'].max()
+            st.write(f"Date range: {oldest_date} to {newest_date}")
         else:
             st.write("No existing database found, will create new one")
             
-        query_strings = get_missing_query_strings()
+        # Get query strings for draws not already in the database
+        query_strings = get_missing_draw_dates(st.session_state.toto_data)
         
         if query_strings:
             st.info(f"Found {len(query_strings)} query strings to process. Scraping data...")
