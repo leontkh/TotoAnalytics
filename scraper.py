@@ -8,6 +8,10 @@ import re
 import trafilatura
 import io
 from io import StringIO
+import urllib3
+
+# Suppress only the single InsecureRequestWarning
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def scrape_toto_results(dates_to_scrape=None):
     """
@@ -31,13 +35,14 @@ def scrape_toto_results(dates_to_scrape=None):
         html_content = None
         error_messages = []
         
-        # Approach 1: Standard requests with basic headers
+        # Approach 1: Standard requests with basic headers and disabled SSL verification
         try:
-            st.info("Trying with basic headers...")
+            st.info("Trying with basic headers and disabled SSL verification...")
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
             }
-            response = requests.get(url, headers=headers)
+            # Disable SSL verification for this specific request
+            response = requests.get(url, headers=headers, verify=False)
             status = response.status_code
             st.info(f"Response status code: {status}")
             
@@ -49,10 +54,10 @@ def scrape_toto_results(dates_to_scrape=None):
         except Exception as e:
             error_messages.append(f"Basic headers approach failed with error: {str(e)}")
         
-        # Approach 2: More complete browser headers
+        # Approach 2: More complete browser headers and disabled SSL verification
         if not html_content:
             try:
-                st.info("Trying with complete browser headers...")
+                st.info("Trying with complete browser headers and disabled SSL verification...")
                 headers = {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -63,7 +68,8 @@ def scrape_toto_results(dates_to_scrape=None):
                     'Cache-Control': 'max-age=0',
                     'Referer': 'https://www.singaporepools.com.sg/en/Pages/Home.aspx',
                 }
-                response = requests.get(url, headers=headers)
+                # Disable SSL verification for this specific request
+                response = requests.get(url, headers=headers, verify=False)
                 status = response.status_code
                 st.info(f"Response status code: {status}")
                 
