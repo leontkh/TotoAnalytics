@@ -88,9 +88,13 @@ def get_available_draw_dates():
                             except Exception as e:
                                 st.warning(f"Failed to parse date {date_str}: {str(e)}")
                 
+                # Sort dates in descending order (most recent first)
+                sorted_dates = sorted(date_to_query.keys(), reverse=True)
+                sorted_date_to_query = {date: date_to_query[date] for date in sorted_dates}
+                
                 # Log the number of available dates
-                st.info(f"Found {len(date_to_query)} available draw dates")
-                return date_to_query
+                st.info(f"Found {len(sorted_date_to_query)} available draw dates")
+                return sorted_date_to_query
             
             except json.JSONDecodeError:
                 # If it's not valid JSON, try to parse as HTML
@@ -100,27 +104,24 @@ def get_available_draw_dates():
                 # Look for draw elements in the HTML
                 date_to_query = {}
                 
-                # We need to find both dates and their corresponding queryStrings
-                # This is more challenging in HTML, but let's look for elements with href attributes
-                for link in soup.find_all('a', href=True):
-                    href = link.get('href')
-                    # Check if this link might be to a draw result page
-                    if 'toto_results.aspx?' in href:
-                        # Extract the query string
-                        query_string = href.split('toto_results.aspx?')[1]
-                        # Try to find a date in the link text
-                        link_text = link.get_text(strip=True)
-                        date_pattern = re.compile(r'\d{1,2}[/\-\s][A-Za-z]{0,9}[/\-\s]\d{4}|\d{4}[/\-]\d{1,2}[/\-]\d{1,2}')
-                        date_match = date_pattern.search(link_text)
-                        
-                        if date_match:
-                            date_str = date_match.group(0)
+                # Find select dropdown with draw dates (typically has class 'selectDrawList')
+                select_element = soup.find('select', class_='selectDrawList')
+                if select_element:
+                    st.info("Found draw list dropdown")
+                    # Extract options from the select element
+                    options = select_element.find_all('option')
+                    for option in options:
+                        if 'queryString' in option.attrs:
+                            query_string = option['queryString']
+                            option_text = option.get_text(strip=True)
+                            
+                            # Extract date from the option text (typically in format like "Mon, 07 Apr 2025")
                             try:
-                                # Try various date formats
+                                # Try to parse date with various formats
                                 date_formatted = None
-                                for fmt in ['%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%d %b %Y', '%d %B %Y']:
+                                for fmt in ['%a, %d %b %Y', '%d %b %Y', '%d/%m/%Y', '%Y-%m-%d']:
                                     try:
-                                        date = datetime.strptime(date_str, fmt)
+                                        date = datetime.strptime(option_text, fmt)
                                         date_formatted = date.strftime('%Y-%m-%d')
                                         break
                                     except ValueError:
@@ -130,11 +131,49 @@ def get_available_draw_dates():
                                     date_to_query[date_formatted] = query_string
                                     st.info(f"Found draw date: {date_formatted} with query string: {query_string}")
                             except Exception as e:
-                                st.warning(f"Failed to parse date {date_str}: {str(e)}")
+                                st.warning(f"Failed to parse date from option: {option_text}, error: {str(e)}")
+                
+                # If no select dropdown found, try alternative method with links
+                if not date_to_query:
+                    st.info("No dropdown found, trying alternative method with links...")
+                    # Look for elements with href attributes
+                    for link in soup.find_all('a', href=True):
+                        href = link.get('href')
+                        # Check if this link might be to a draw result page
+                        if 'toto_results.aspx?' in href:
+                            # Extract the query string
+                            query_string = href.split('toto_results.aspx?')[1]
+                            # Try to find a date in the link text
+                            link_text = link.get_text(strip=True)
+                            date_pattern = re.compile(r'\d{1,2}[/\-\s][A-Za-z]{0,9}[/\-\s]\d{4}|\d{4}[/\-]\d{1,2}[/\-]\d{1,2}')
+                            date_match = date_pattern.search(link_text)
+                            
+                            if date_match:
+                                date_str = date_match.group(0)
+                                try:
+                                    # Try various date formats
+                                    date_formatted = None
+                                    for fmt in ['%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%d %b %Y', '%d %B %Y']:
+                                        try:
+                                            date = datetime.strptime(date_str, fmt)
+                                            date_formatted = date.strftime('%Y-%m-%d')
+                                            break
+                                        except ValueError:
+                                            continue
+                                    
+                                    if date_formatted:
+                                        date_to_query[date_formatted] = query_string
+                                        st.info(f"Found draw date: {date_formatted} with query string: {query_string}")
+                                except Exception as e:
+                                    st.warning(f"Failed to parse date {date_str}: {str(e)}")
+                
+                # Sort dates in descending order (most recent first)
+                sorted_dates = sorted(date_to_query.keys(), reverse=True)
+                sorted_date_to_query = {date: date_to_query[date] for date in sorted_dates}
                 
                 # Log the number of available dates
-                st.info(f"Found {len(date_to_query)} available draw dates from HTML")
-                return date_to_query
+                st.info(f"Found {len(sorted_date_to_query)} available draw dates from HTML")
+                return sorted_date_to_query
         
         else:
             st.error(f"Failed to fetch draw dates. Status code: {response.status_code}")
