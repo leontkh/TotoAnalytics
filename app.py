@@ -36,8 +36,6 @@ and provides analytics on historical data.
 # Sidebar
 st.sidebar.title("Controls")
 update_data = st.sidebar.button("Update Database")
-clear_data = st.sidebar.button("Clear Database")
-fix_duplicates = st.sidebar.button("Fix Duplicate Entries")
 
 if update_data:
     with st.spinner("Updating database with latest TOTO results..."):
@@ -194,65 +192,6 @@ if update_data:
     
     # Use st.rerun to refresh the page after update
     st.rerun()
-
-# Handle fix duplicates button click
-if fix_duplicates:
-    if st.session_state.toto_data is not None and not st.session_state.toto_data.empty:
-        # Check for duplicates
-        duplicate_rows = st.session_state.toto_data[st.session_state.toto_data.duplicated(subset=['draw_number'], keep=False)]
-        
-        if not duplicate_rows.empty:
-            st.warning(f"Found {len(duplicate_rows)} duplicate entries in the database!")
-            
-            # Show the duplicates
-            st.write("Sample of duplicate entries:")
-            st.dataframe(duplicate_rows[['draw_date', 'draw_number']].head(10))
-            
-            # For diagnosis purposes, let's check what draw numbers are duplicated
-            duplicate_numbers = duplicate_rows['draw_number'].unique()
-            st.warning(f"Duplicate draw numbers: {list(duplicate_numbers)}")
-            
-            # Confirm before fixing
-            if st.button("Fix Duplicates Now"):
-                # Remove duplicates to get a clean database
-                deduplicated_data = st.session_state.toto_data.drop_duplicates(subset=['draw_number'], keep='first')
-                
-                # Save the deduplicated data
-                st.session_state.toto_data = deduplicated_data
-                save_database(deduplicated_data)
-                st.session_state.last_updated = datetime.datetime.now()
-                
-                st.success(f"Successfully removed {len(st.session_state.toto_data) - len(deduplicated_data)} duplicate entries. Database now has {len(deduplicated_data)} unique draws.")
-                st.rerun()
-        else:
-            st.success("No duplicate entries found in the database!")
-    else:
-        st.info("Database is empty. No duplicates to fix.")
-
-# Display last updated time
-# Handle clear database button click
-if clear_data:
-    if st.session_state.toto_data is not None and not st.session_state.toto_data.empty:
-        # Ask for confirmation
-        st.warning("Are you sure you want to clear the database? This action cannot be undone.")
-        col1, col2 = st.columns(2)
-        with col1:
-            confirm_clear = st.button("Yes, clear database")
-        with col2:
-            cancel_clear = st.button("Cancel")
-        
-        if confirm_clear:
-            # Clear the database
-            st.session_state.toto_data = None
-            st.session_state.last_updated = None
-            # Remove the database file if it exists
-            import os
-            if os.path.exists('toto_database.pkl'):
-                os.remove('toto_database.pkl')
-            st.success("Database cleared successfully!")
-            st.rerun()
-    else:
-        st.info("Database is already empty.")
 
 # Display last updated time
 if st.session_state.last_updated:
