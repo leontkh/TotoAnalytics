@@ -245,8 +245,7 @@ def scrape_toto_results(dates_to_scrape=None):
             'group_4_winners': 0, 'group_4_prize': 0,
             'group_5_winners': 0, 'group_5_prize': 0,
             'group_6_winners': 0, 'group_6_prize': 0,
-            'group_7_winners': 0, 'group_7_prize': 0,
-            'jackpot_amount': None
+            'group_7_winners': 0, 'group_7_prize': 0
         }
         
         # Look for the winning shares table
