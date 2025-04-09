@@ -36,6 +36,7 @@ and provides analytics on historical data.
 # Sidebar
 st.sidebar.title("Controls")
 update_data = st.sidebar.button("Update Database")
+clear_data = st.sidebar.button("Clear Database")
 
 if update_data:
     with st.spinner("Updating database with latest TOTO results..."):
@@ -59,20 +60,64 @@ if update_data:
                 
             # Process each query string one by one
             results_dataframes = []
+            batch_size = 10  # Process in batches to avoid overwhelming the UI
+            total_batches = (len(query_strings) + batch_size - 1) // batch_size
             
-            for i, query_string in enumerate(query_strings[:5]):  # Process first 5 for testing
-                st.write(f"Processing query string {i+1}/{min(5, len(query_strings))}: {query_string}")
+            st.info(f"Will process all {len(query_strings)} query strings in {total_batches} batches of {batch_size} each")
+            
+            # Create a progress bar
+            progress_bar = st.progress(0)
+            
+            for batch_idx in range(total_batches):
+                batch_start = batch_idx * batch_size
+                batch_end = min(batch_start + batch_size, len(query_strings))
+                current_batch = query_strings[batch_start:batch_end]
                 
-                # Scrape TOTO results using the query string
-                st.write("Starting scraper...")
-                single_draw_data = scrape_toto_results(query_string)
+                st.write(f"Processing batch {batch_idx+1}/{total_batches} ({batch_end-batch_start} query strings)")
                 
-                if single_draw_data is not None and not single_draw_data.empty:
-                    st.write(f"Successfully scraped draw with query string: {query_string}")
-                    st.write(f"DataFrame shape: {single_draw_data.shape}")
-                    results_dataframes.append(single_draw_data)
-                else:
-                    st.warning(f"Failed to scrape data for query string: {query_string}")
+                for i, query_string in enumerate(current_batch):
+                    overall_idx = batch_start + i
+                    progress = min(100, int((overall_idx + 1) / len(query_strings) * 100))
+                    progress_bar.progress(progress)
+                    
+                    st.write(f"Processing query string {overall_idx+1}/{len(query_strings)}: {query_string}")
+                    
+                    # Scrape TOTO results using the query string
+                    st.write("Starting scraper...")
+                    single_draw_data = scrape_toto_results(query_string)
+                    
+                    if single_draw_data is not None and not single_draw_data.empty:
+                        st.write(f"Successfully scraped draw with query string: {query_string}")
+                        st.write(f"DataFrame shape: {single_draw_data.shape}")
+                        results_dataframes.append(single_draw_data)
+                    else:
+                        st.warning(f"Failed to scrape data for query string: {query_string}")
+                
+                # If we're not on the last batch, show a partial update
+                if batch_idx < total_batches - 1 and results_dataframes:
+                    st.info(f"Batch {batch_idx+1} complete. Scraped {len(results_dataframes)} draws so far.")
+                    
+                    # Optionally save the partial results every few batches
+                    if (batch_idx + 1) % 5 == 0:
+                        try:
+                            partial_data = pd.concat(results_dataframes, ignore_index=True)
+                            partial_data_with_pools = calculate_prize_pools(partial_data)
+                            
+                            if st.session_state.toto_data is not None:
+                                interim_combined = pd.concat([st.session_state.toto_data, partial_data_with_pools], ignore_index=True)
+                                interim_combined = interim_combined.drop_duplicates(subset=['draw_date', 'draw_number'], keep='last')
+                            else:
+                                interim_combined = partial_data_with_pools
+                            
+                            st.session_state.toto_data = interim_combined
+                            save_database(interim_combined)
+                            st.session_state.last_updated = datetime.datetime.now()
+                            st.success(f"Saved intermediate results with {len(partial_data)} draws")
+                        except Exception as e:
+                            st.warning(f"Could not save intermediate results: {str(e)}")
+            
+            # Completed all batches
+            st.success(f"Completed processing {len(query_strings)} query strings")
             
             # Combine all dataframes
             if results_dataframes:
@@ -143,6 +188,31 @@ if update_data:
     
     # Use st.rerun to refresh the page after update
     st.rerun()
+
+# Display last updated time
+# Handle clear database button click
+if clear_data:
+    if st.session_state.toto_data is not None and not st.session_state.toto_data.empty:
+        # Ask for confirmation
+        st.warning("Are you sure you want to clear the database? This action cannot be undone.")
+        col1, col2 = st.columns(2)
+        with col1:
+            confirm_clear = st.button("Yes, clear database")
+        with col2:
+            cancel_clear = st.button("Cancel")
+        
+        if confirm_clear:
+            # Clear the database
+            st.session_state.toto_data = None
+            st.session_state.last_updated = None
+            # Remove the database file if it exists
+            import os
+            if os.path.exists('toto_database.pkl'):
+                os.remove('toto_database.pkl')
+            st.success("Database cleared successfully!")
+            st.rerun()
+    else:
+        st.info("Database is already empty.")
 
 # Display last updated time
 if st.session_state.last_updated:
