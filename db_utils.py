@@ -115,44 +115,63 @@ def save_database(df):
             return False
         
         # Make sure the database is initialized
-        if not engine.dialect.has_table(engine.connect(), 'toto_results'):
-            initialize_database()
+        with engine.connect() as conn:
+            if not engine.dialect.has_table(conn, 'toto_results'):
+                print("Table 'toto_results' doesn't exist, initializing...")
+                initialize_database()
+                print("Database initialized.")
+        
+        # Log some information for debugging
+        print(f"Attempting to save {len(df)} records to database")
+        print(f"DataFrame columns: {df.columns.tolist()}")
+        print(f"First row sample: {df.iloc[0].to_dict()}")
         
         # Prepare data for insertion
         records = []
         for _, row in df.iterrows():
-            # Convert pandas timestamp to date
-            if isinstance(row['draw_date'], pd.Timestamp):
-                draw_date = row['draw_date'].date()
-            else:
-                draw_date = row['draw_date']
-            
-            # Create record dictionary
-            record = {
-                'draw_number': int(row['draw_number']),
-                'draw_date': draw_date,
-                'winning_numbers': row['winning_numbers'],
-                'additional_number': int(row['additional_number']),
-                'group_1_winners': int(row['group_1_winners']) if pd.notna(row['group_1_winners']) else None,
-                'group_1_prize': float(row['group_1_prize']) if pd.notna(row['group_1_prize']) else None,
-                'group_2_winners': int(row['group_2_winners']) if pd.notna(row['group_2_winners']) else None,
-                'group_2_prize': float(row['group_2_prize']) if pd.notna(row['group_2_prize']) else None,
-                'group_3_winners': int(row['group_3_winners']) if pd.notna(row['group_3_winners']) else None,
-                'group_3_prize': float(row['group_3_prize']) if pd.notna(row['group_3_prize']) else None,
-                'group_4_winners': int(row['group_4_winners']) if pd.notna(row['group_4_winners']) else None,
-                'group_4_prize': float(row['group_4_prize']) if pd.notna(row['group_4_prize']) else None,
-                'group_5_winners': int(row['group_5_winners']) if pd.notna(row['group_5_winners']) else None,
-                'group_5_prize': float(row['group_5_prize']) if pd.notna(row['group_5_prize']) else None,
-                'group_6_winners': int(row['group_6_winners']) if pd.notna(row['group_6_winners']) else None,
-                'group_6_prize': float(row['group_6_prize']) if pd.notna(row['group_6_prize']) else None,
-                'group_7_winners': int(row['group_7_winners']) if pd.notna(row['group_7_winners']) else None,
-                'group_7_prize': float(row['group_7_prize']) if pd.notna(row['group_7_prize']) else None,
-                'estimated_jackpot': float(row['estimated_jackpot']) if 'estimated_jackpot' in row and pd.notna(row['estimated_jackpot']) else None,
-                'cascade_amount': float(row['cascade_amount']) if 'cascade_amount' in row and pd.notna(row['cascade_amount']) else None,
-                'query_string': row['query_string'] if 'query_string' in row else None
-            }
-            records.append(record)
+            try:
+                # Convert pandas timestamp to date
+                if isinstance(row['draw_date'], pd.Timestamp):
+                    draw_date = row['draw_date'].date()
+                else:
+                    draw_date = row['draw_date']
+                
+                # Create record dictionary with proper type conversion and validation
+                record = {
+                    'draw_number': int(row['draw_number']),
+                    'draw_date': draw_date,
+                    'winning_numbers': row['winning_numbers'],
+                    'additional_number': int(row['additional_number']),
+                    'group_1_winners': int(row['group_1_winners']) if pd.notna(row['group_1_winners']) else 0,
+                    'group_1_prize': float(row['group_1_prize']) if pd.notna(row['group_1_prize']) else 0.0,
+                    'group_2_winners': int(row['group_2_winners']) if pd.notna(row['group_2_winners']) else 0,
+                    'group_2_prize': float(row['group_2_prize']) if pd.notna(row['group_2_prize']) else 0.0,
+                    'group_3_winners': int(row['group_3_winners']) if pd.notna(row['group_3_winners']) else 0,
+                    'group_3_prize': float(row['group_3_prize']) if pd.notna(row['group_3_prize']) else 0.0,
+                    'group_4_winners': int(row['group_4_winners']) if pd.notna(row['group_4_winners']) else 0,
+                    'group_4_prize': float(row['group_4_prize']) if pd.notna(row['group_4_prize']) else 0.0,
+                    'group_5_winners': int(row['group_5_winners']) if pd.notna(row['group_5_winners']) else 0,
+                    'group_5_prize': float(row['group_5_prize']) if pd.notna(row['group_5_prize']) else 0.0,
+                    'group_6_winners': int(row['group_6_winners']) if pd.notna(row['group_6_winners']) else 0,
+                    'group_6_prize': float(row['group_6_prize']) if pd.notna(row['group_6_prize']) else 0.0,
+                    'group_7_winners': int(row['group_7_winners']) if pd.notna(row['group_7_winners']) else 0,
+                    'group_7_prize': float(row['group_7_prize']) if pd.notna(row['group_7_prize']) else 0.0,
+                    'estimated_jackpot': float(row['estimated_jackpot']) if 'estimated_jackpot' in row and pd.notna(row['estimated_jackpot']) else 0.0,
+                    'cascade_amount': float(row['cascade_amount']) if 'cascade_amount' in row and pd.notna(row['cascade_amount']) else 0.0,
+                    'query_string': str(row['query_string']) if 'query_string' in row and row['query_string'] is not None else ''
+                }
+                records.append(record)
+                
+            except Exception as e:
+                print(f"Error processing row: {e}")
+                print(f"Problematic row: {row}")
+                continue
         
+        print(f"Processed {len(records)} valid records for database insertion")
+        if not records:
+            st.error("No valid records to save to database")
+            return False
+            
         # Start a transaction
         connection = engine.connect()
         transaction = connection.begin()
@@ -160,19 +179,29 @@ def save_database(df):
         try:
             # Insert each record with update on conflict
             for record in records:
-                # Check if record already exists
-                query = select([toto_results]).where(toto_results.c.draw_number == record['draw_number'])
-                result = connection.execute(query).fetchone()
-                
-                if not result:
-                    # Insert new record
-                    connection.execute(toto_results.insert().values(**record))
-                else:
-                    # Update existing record (delete and reinsert since we don't have a proper upsert with SQLAlchemy Core)
-                    connection.execute(
-                        toto_results.delete().where(toto_results.c.draw_number == record['draw_number'])
-                    )
-                    connection.execute(toto_results.insert().values(**record))
+                try:
+                    # Debug information
+                    print(f"Processing record for draw #{record['draw_number']}")
+                    
+                    # Check if record already exists
+                    query = select([toto_results]).where(toto_results.c.draw_number == record['draw_number'])
+                    result = connection.execute(query).fetchone()
+                    
+                    if not result:
+                        # Insert new record
+                        print(f"Inserting new record for draw #{record['draw_number']}")
+                        connection.execute(toto_results.insert().values(**record))
+                    else:
+                        # Update existing record
+                        print(f"Updating existing record for draw #{record['draw_number']}")
+                        connection.execute(
+                            toto_results.delete().where(toto_results.c.draw_number == record['draw_number'])
+                        )
+                        connection.execute(toto_results.insert().values(**record))
+                except Exception as e:
+                    print(f"Error with record {record['draw_number']}: {str(e)}")
+                    # Continue with the next record rather than failing the entire transaction
+                    continue
             
             # Commit the transaction
             transaction.commit()
@@ -183,10 +212,12 @@ def save_database(df):
             # Rollback the transaction on error
             transaction.rollback()
             st.error(f"Error during database transaction: {str(e)}")
+            print(f"Transaction error: {str(e)}")
             return False
             
     except Exception as e:
         st.error(f"Error saving to database: {str(e)}")
+        print(f"Overall save error: {str(e)}")
         return False
 
 def migrate_from_pickle():
@@ -235,3 +266,30 @@ def test_connection():
             return True, "Successfully connected to PostgreSQL database"
     except Exception as e:
         return False, f"Failed to connect to PostgreSQL database: {str(e)}"
+
+def debug_database():
+    """Debug function to check database state"""
+    try:
+        # Check if connection works
+        success, message = test_connection()
+        print(f"Database connection: {success}, Message: {message}")
+        
+        # Check if the table exists
+        with engine.connect() as connection:
+            exists = engine.dialect.has_table(connection, 'toto_results')
+            print(f"Table 'toto_results' exists: {exists}")
+            
+            if exists:
+                # Check table contents
+                query = select([toto_results])
+                result = connection.execute(query).fetchall()
+                print(f"Number of records in database: {len(result)}")
+                
+                if len(result) > 0:
+                    # Print a sample record
+                    print(f"Sample record (first row): {result[0]}")
+        
+        return True
+    except Exception as e:
+        print(f"Error during database debugging: {str(e)}")
+        return False

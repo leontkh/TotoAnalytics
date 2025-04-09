@@ -16,7 +16,11 @@ from db_utils import (
     save_database, 
     initialize_database, 
     migrate_from_pickle,
-    test_connection
+    test_connection,
+    debug_database,
+    engine,
+    toto_results,
+    select
 )
 
 # Set page config
@@ -51,6 +55,44 @@ if not 'db_initialized' in st.session_state:
 # Sidebar
 st.sidebar.title("Controls")
 update_data = st.sidebar.button("Update Database")
+
+# Add a debug button
+debug_btn = st.sidebar.button("Debug Database")
+if debug_btn:
+    # Run database debug function and show detailed results
+    with st.expander("Database Debug Information", expanded=True):
+        st.write("Debugging PostgreSQL database...")
+        
+        # Run the debug function (outputs to console)
+        debug_database()
+        
+        # Check connection
+        db_success, db_message = test_connection()
+        st.write(f"Database connection: {'✅ Success' if db_success else '❌ Failed'}")
+        st.write(f"Message: {db_message}")
+        
+        # Check if table exists
+        try:
+            with engine.connect() as connection:
+                exists = engine.dialect.has_table(connection, 'toto_results')
+                st.write(f"Table 'toto_results' exists: {exists}")
+                
+                if exists:
+                    # Check table contents
+                    query = select([toto_results])
+                    result = connection.execute(query).fetchall()
+                    st.write(f"Number of records in database: {len(result)}")
+                    
+                    if len(result) > 0:
+                        st.write("Sample record (first row):")
+                        st.json({column: str(value) for column, value in zip(result[0].keys(), result[0])})
+        except Exception as e:
+            st.error(f"Error checking database: {str(e)}")
+
+        # Try to initialize database if needed
+        st.write("Attempting to initialize database...")
+        success = initialize_database(silent=False)
+        st.write(f"Database initialization: {'✅ Success' if success else '❌ Failed'}")
 
 if update_data:
     with st.spinner("Updating database with latest TOTO results..."):
