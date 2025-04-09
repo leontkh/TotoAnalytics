@@ -732,6 +732,7 @@ dependencies = [
     { name = "requests" },
     { name = "streamlit" },
     { name = "trafilatura" },
+    { name = "urllib3" },
 ]
 
 [package.metadata]
@@ -743,6 +744,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32.3" },
     { name = "streamlit", specifier = ">=1.44.1" },
     { name = "trafilatura", specifier = ">=2.0.0" },
+    { name = "urllib3", specifier = ">=2.3.0" },
 ]
 
 [[package]]

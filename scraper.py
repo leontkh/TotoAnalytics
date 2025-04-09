@@ -14,59 +14,19 @@ import json
 # Suppress only the single InsecureRequestWarning
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# We'll no longer need this function since we're using queryString approach
+# Leaving this as a placeholder in case we need to implement JSON API parsing in the future
 def get_draw_results_by_date(draw_date):
     """
-    Fetch TOTO results for a specific draw date from the Singapore Pools API
+    This function is deprecated as we're now using the queryString approach
     
     Args:
         draw_date: Draw date in 'YYYY-MM-DD' format
     
     Returns:
-        Dictionary containing the draw information, or None if not found
+        None - this function is no longer used
     """
-    # Convert YYYY-MM-DD to the format expected by the API (if needed)
-    try:
-        date_obj = datetime.strptime(draw_date, '%Y-%m-%d')
-        # Singapore Pools might use a different date format in their API
-        date_str_formatted = date_obj.strftime('%d_%m_%Y')  # DD_MM_YYYY format
-    except:
-        st.error(f"Invalid date format: {draw_date}")
-        return None
-    
-    # Try different API endpoints that might contain results for this date
-    api_urls = [
-        f"https://www.singaporepools.com.sg/DataFileArchive/Lottery/Output/toto_result_{date_str_formatted}_en.json",
-        f"https://www.singaporepools.com.sg/en/product/sr/Pages/toto_numbers_{date_str_formatted}.json"
-    ]
-    
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Referer': 'https://www.singaporepools.com.sg/en/Pages/Home.aspx',
-    }
-    
-    for url in api_urls:
-        try:
-            st.info(f"Trying to fetch results from: {url}")
-            # Disable SSL verification
-            response = requests.get(url, headers=headers, verify=False)
-            
-            if response.status_code == 200:
-                try:
-                    data = response.json()
-                    st.success(f"Successfully fetched results from {url}")
-                    return data
-                except json.JSONDecodeError:
-                    st.warning(f"Response from {url} is not valid JSON")
-            else:
-                st.warning(f"Failed to fetch from {url}. Status code: {response.status_code}")
-        except Exception as e:
-            st.warning(f"Error fetching from {url}: {str(e)}")
-    
-    st.error(f"Could not fetch results for draw date {draw_date} from any API endpoint")
+    st.warning(f"Direct JSON API is not being used. Using queryString approach instead for date: {draw_date}")
     return None
 
 def get_available_draw_dates():
@@ -393,78 +353,7 @@ def scrape_toto_results(dates_to_scrape=None):
                     except Exception as e:
                         st.warning(f"Error processing data for {date} from specific URL: {str(e)}")
                 else:
-                    st.info(f"No queryString found for date {date}, trying general API approach...")
-                    draw_data = get_draw_results_by_date(date)
-                    
-                    if draw_data:
-                        # Extract data from API response
-                        try:
-                            st.info(f"Processing API data for {date}...")
-                            
-                            # Different APIs might have different response structures, so we need to handle various formats
-                            # Extract draw number
-                            draw_number = None
-                            if 'drawNumber' in draw_data:
-                                draw_number = int(draw_data['drawNumber'])
-                            elif 'drawNo' in draw_data:
-                                draw_number = int(draw_data['drawNo'])
-                            
-                            # Extract winning numbers
-                            winning_numbers = []
-                            additional_number = None
-                            
-                            # Check different fields that might contain winning numbers
-                            if 'winningNumbers' in draw_data:
-                                if isinstance(draw_data['winningNumbers'], list):
-                                    winning_numbers = [int(num) for num in draw_data['winningNumbers']]
-                                elif isinstance(draw_data['winningNumbers'], str):
-                                    winning_numbers = [int(num) for num in draw_data['winningNumbers'].split(',')]
-                            
-                            # Check for additional number
-                            if 'additionalNumber' in draw_data:
-                                additional_number = int(draw_data['additionalNumber'])
-                            
-                            # Initialize prize data
-                            prize_data = {
-                                'group_1_winners': 0, 'group_1_prize': 0,
-                                'group_2_winners': 0, 'group_2_prize': 0,
-                                'group_3_winners': 0, 'group_3_prize': 0,
-                                'group_4_winners': 0, 'group_4_prize': 0,
-                                'group_5_winners': 0, 'group_5_prize': 0,
-                                'group_6_winners': 0, 'group_6_prize': 0,
-                                'group_7_winners': 0, 'group_7_prize': 0
-                            }
-                            
-                            # Extract prize information if available
-                            if 'prizes' in draw_data and isinstance(draw_data['prizes'], list):
-                                for prize in draw_data['prizes']:
-                                    if 'groupId' in prize and 'winners' in prize and 'prize' in prize:
-                                        group_id = int(prize['groupId'])
-                                        if 1 <= group_id <= 7:
-                                            prize_data[f'group_{group_id}_winners'] = int(prize['winners'])
-                                            # Prize might be a string with $ and commas
-                                            prize_amount = prize['prize']
-                                            if isinstance(prize_amount, str):
-                                                prize_amount = prize_amount.replace('$', '').replace(',', '')
-                                            prize_data[f'group_{group_id}_prize'] = float(prize_amount)
-                            
-                            # Create result entry
-                            if draw_number and winning_numbers and additional_number:
-                                result = {
-                                    'draw_date': date,
-                                    'draw_number': draw_number,
-                                    'winning_numbers': winning_numbers,
-                                    'additional_number': additional_number,
-                                    **prize_data
-                                }
-                                results.append(result)
-                                st.success(f"Successfully processed draw #{draw_number} on {date} from API")
-                                api_success = True
-                            else:
-                                st.warning(f"Incomplete data from API for draw date {date}")
-                        
-                        except Exception as e:
-                            st.warning(f"Error processing API data for {date}: {str(e)}")
+                    st.warning(f"No queryString found for date {date}, skipping to next date or falling back to general scraping...")
         
         # If neither queryString nor API approach succeeded, fall back to general web scraping
         if not api_success:
