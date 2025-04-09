@@ -51,11 +51,20 @@ if update_data:
         
         if missing_dates:
             st.info(f"Found {len(missing_dates)} missing draw dates. Scraping data...")
-            st.write(f"Missing dates: {missing_dates[:5]}...")
+            # Just to confirm the missing dates in UI
+            if len(missing_dates) > 5:
+                st.write(f"Missing dates: {missing_dates[:5]} and {len(missing_dates)-5} more...")
+            else:
+                st.write(f"Missing dates: {missing_dates}")
+                
+            # Limit to a smaller batch for testing/debugging
+            max_dates_per_batch = 10
+            batch_missing_dates = missing_dates[:max_dates_per_batch]
+            st.write(f"Processing batch of {len(batch_missing_dates)} dates: {batch_missing_dates}")
             
             # Scrape missing draw data
             st.write("Starting scraper...")
-            new_data = scrape_toto_results(missing_dates)
+            new_data = scrape_toto_results(batch_missing_dates)
             
             if new_data is not None:
                 st.write(f"Scraper returned DataFrame with shape: {new_data.shape}")

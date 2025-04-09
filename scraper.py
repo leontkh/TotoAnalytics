@@ -104,13 +104,28 @@ def get_available_draw_dates():
                 # Look for draw elements in the HTML
                 date_to_query = {}
                 
+                # Detailed log of HTML content for debugging
+                st.write("HTML content snippet:")
+                st.code(soup.prettify()[:1000])  # Display the first 1000 characters of the HTML
+                
                 # Find select dropdown with draw dates (typically has class 'selectDrawList')
                 select_element = soup.find('select', class_='selectDrawList')
+                st.write(f"Select element found: {select_element is not None}")
+                
                 if select_element:
                     st.info("Found draw list dropdown")
+                    # Log the dropdown HTML
+                    st.code(select_element.prettify())
+                    
                     # Extract options from the select element
                     options = select_element.find_all('option')
-                    for option in options:
+                    st.write(f"Number of options found: {len(options)}")
+                    
+                    for i, option in enumerate(options):
+                        st.write(f"Processing option {i+1}:")
+                        st.write(f"Option attributes: {option.attrs}")
+                        st.write(f"Option text: {option.get_text(strip=True)}")
+                        
                         if 'queryString' in option.attrs:
                             query_string = option['queryString']
                             option_text = option.get_text(strip=True)
@@ -123,13 +138,17 @@ def get_available_draw_dates():
                                     try:
                                         date = datetime.strptime(option_text, fmt)
                                         date_formatted = date.strftime('%Y-%m-%d')
+                                        st.success(f"Successfully parsed date {option_text} with format {fmt}")
                                         break
                                     except ValueError:
+                                        st.write(f"Failed to parse with format {fmt}")
                                         continue
                                 
                                 if date_formatted:
                                     date_to_query[date_formatted] = query_string
-                                    st.info(f"Found draw date: {date_formatted} with query string: {query_string}")
+                                    st.success(f"Found draw date: {date_formatted} with query string: {query_string}")
+                                else:
+                                    st.warning(f"Could not parse date from option text: {option_text}")
                             except Exception as e:
                                 st.warning(f"Failed to parse date from option: {option_text}, error: {str(e)}")
                 
@@ -267,25 +286,78 @@ def scrape_toto_results(dates_to_scrape=None):
                             winning_numbers = []
                             additional_number = None
                             
-                            # Look for the table that contains the winning numbers
+                            # Multiple approaches to find winning numbers
+                            
+                            # Approach 1: Look for "Winning Numbers" text
                             winning_numbers_header = soup.find(string=re.compile("Winning Numbers", re.IGNORECASE))
                             if winning_numbers_header:
+                                st.info("Found 'Winning Numbers' text")
                                 # Find the table by going up the DOM tree
                                 parent = winning_numbers_header.parent
                                 while parent and parent.name != 'table':
                                     parent = parent.parent
                                 
                                 if parent and parent.name == 'table':
+                                    st.info("Found table containing winning numbers")
                                     # Extract numbers from this table
                                     for cell in parent.find_all(['td', 'th']):
                                         cell_text = cell.get_text(strip=True)
                                         if cell_text.isdigit() and 1 <= int(cell_text) <= 49:  # TOTO numbers are 1-49
                                             winning_numbers.append(int(cell_text))
+                                    st.info(f"Extracted numbers from table: {winning_numbers}")
+                            
+                            # Approach 2: Look for a div with number class
+                            if not winning_numbers or len(winning_numbers) < 6:
+                                st.info("Looking for elements with number classes...")
+                                number_elements = soup.find_all(class_=re.compile("(number|ball|toto-number)", re.IGNORECASE))
+                                
+                                if number_elements:
+                                    st.info(f"Found {len(number_elements)} elements with number classes")
+                                    candidate_numbers = []
+                                    for elem in number_elements:
+                                        elem_text = elem.get_text(strip=True)
+                                        if elem_text.isdigit() and 1 <= int(elem_text) <= 49:
+                                            candidate_numbers.append(int(elem_text))
+                                    
+                                    # If we found at least 7 numbers (6 winning + 1 additional), use them
+                                    if len(candidate_numbers) >= 7:
+                                        winning_numbers = candidate_numbers[:6]
+                                        additional_number = candidate_numbers[6]
+                                        st.info(f"Found numbers from class elements: {winning_numbers} + {additional_number}")
+                                    # If we found 6 numbers, use them and look for additional separately
+                                    elif len(candidate_numbers) == 6:
+                                        winning_numbers = candidate_numbers
+                                        st.info(f"Found exactly 6 numbers from class elements: {winning_numbers}")
+                            
+                            # Approach 3: Try to find all tables and look for one with 6-7 numbers
+                            if not winning_numbers or len(winning_numbers) < 6:
+                                st.info("Scanning all tables for winning numbers...")
+                                all_tables = soup.find_all('table')
+                                for table in all_tables:
+                                    table_numbers = []
+                                    for cell in table.find_all(['td', 'th']):
+                                        cell_text = cell.get_text(strip=True)
+                                        if cell_text.isdigit() and 1 <= int(cell_text) <= 49:
+                                            table_numbers.append(int(cell_text))
+                                    
+                                    # Check if this table has 6 or 7 numbers (potential winning numbers table)
+                                    if 6 <= len(table_numbers) <= 7:
+                                        st.info(f"Found table with {len(table_numbers)} numbers: {table_numbers}")
+                                        if len(table_numbers) == 7:
+                                            winning_numbers = table_numbers[:6]
+                                            additional_number = table_numbers[6]
+                                        else:  # len == 6
+                                            winning_numbers = table_numbers
+                                        break
                             
                             # Look for additional number
                             if not additional_number:
+                                # Try multiple approaches to find the additional number
+                                
+                                # Approach 1: Look for "Additional Number" text
                                 additional_header = soup.find(string=re.compile("Additional Number", re.IGNORECASE))
                                 if additional_header:
+                                    st.info("Found 'Additional Number' text")
                                     # Find closest table by going up the DOM tree
                                     parent = additional_header.parent
                                     while parent and parent.name != 'table':
@@ -296,6 +368,35 @@ def scrape_toto_results(dates_to_scrape=None):
                                             cell_text = cell.get_text(strip=True)
                                             if cell_text.isdigit() and 1 <= int(cell_text) <= 49:
                                                 additional_number = int(cell_text)
+                                                st.info(f"Found additional number: {additional_number}")
+                                                break
+                                
+                                # Approach 2: If we already have winning numbers, look for a separate number in a div or span
+                                if not additional_number and winning_numbers and len(winning_numbers) >= 6:
+                                    st.info("Looking for additional number near winning numbers...")
+                                    # Look for a div or span with a single number that's not in winning_numbers
+                                    for elem in soup.find_all(['div', 'span', 'td']):
+                                        elem_text = elem.get_text(strip=True)
+                                        if elem_text.isdigit() and 1 <= int(elem_text) <= 49:
+                                            num = int(elem_text)
+                                            if num not in winning_numbers:
+                                                additional_number = num
+                                                st.info(f"Found additional number: {additional_number}")
+                                                break
+                                
+                                # Approach 3: Try to find a container with "additional" class
+                                if not additional_number:
+                                    st.info("Looking for element with 'additional' class...")
+                                    additional_elems = soup.find_all(class_=re.compile("additional", re.IGNORECASE))
+                                    for elem in additional_elems:
+                                        elem_text = elem.get_text(strip=True)
+                                        # Try to extract a number from the text
+                                        num_match = re.search(r'\d+', elem_text)
+                                        if num_match:
+                                            num = int(num_match.group(0))
+                                            if 1 <= num <= 49:
+                                                additional_number = num
+                                                st.info(f"Found additional number from class: {additional_number}")
                                                 break
                             
                             # Initialize prize data
