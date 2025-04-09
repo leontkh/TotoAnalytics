@@ -6,6 +6,8 @@ import time
 import streamlit as st
 import re
 import trafilatura
+import io
+from io import StringIO
 
 def scrape_toto_results(dates_to_scrape=None):
     """
@@ -23,196 +25,248 @@ def scrape_toto_results(dates_to_scrape=None):
     try:
         st.info("Attempting to scrape TOTO results...")
         
-        # Use trafilatura to download the page content - handles modern web page structures better
-        downloaded = trafilatura.fetch_url(url)
-        if not downloaded:
-            st.error("Failed to download the page content using trafilatura.")
-            # Fallback to regular requests
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
+        # Use a modern browser user agent
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        try:
+            # First download with requests
             response = requests.get(url, headers=headers)
             response.raise_for_status()
             html_content = response.text
-        else:
+            st.info(f"Downloaded {len(html_content)} bytes with requests")
+        except Exception as e:
+            st.error(f"Error downloading with requests: {str(e)}")
+            # Try trafilatura as fallback
+            downloaded = trafilatura.fetch_url(url)
+            if not downloaded:
+                st.error("Failed to download the page content.")
+                return pd.DataFrame()
             html_content = downloaded
+            st.info(f"Downloaded {len(html_content)} bytes with trafilatura")
         
         # Parse with BeautifulSoup
         soup = BeautifulSoup(html_content, 'html.parser')
         
-        # Look for result blocks with different possible class names
-        result_blocks = soup.find_all('div', class_=['result-block', 'lottery-result', 'toto-result-block', 'toto-results'])
+        # Try to extract tables directly
+        all_tables = soup.find_all('table')
+        st.info(f"Found {len(all_tables)} tables on the page")
         
-        if not result_blocks:
-            st.warning("No result blocks found with expected class names. Trying alternative methods...")
-            # Try to find blocks based on content patterns instead of class names
-            possible_blocks = soup.find_all('div')
-            result_blocks = [div for div in possible_blocks if 
-                             div.find(text=re.compile("DRAW NO", re.IGNORECASE)) or 
-                             div.find(text=re.compile("TOTO", re.IGNORECASE))]
+        # First try to find draw date and number
+        draw_info = {}
         
-        st.info(f"Found {len(result_blocks)} potential result blocks.")
+        # Look for draw date in the page
+        date_pattern = re.compile(r'\d{1,2}\s+[A-Za-z]+\s+\d{4}')
+        date_elements = soup.find_all(string=date_pattern)
         
-        # Process each block
-        for i, block in enumerate(result_blocks):
-            try:
-                # Try to extract draw information
-                # Look for text that contains date patterns and draw numbers
-                draw_info_text = None
-                draw_info_element = block.find(text=re.compile(r'\d{1,2}\s+[A-Za-z]+\s+\d{4}'))
-                
-                if draw_info_element:
-                    # If we found date text, get the containing element's full text
-                    parent = draw_info_element.parent
-                    draw_info_text = parent.get_text(strip=True) if parent else draw_info_element
-                
-                if not draw_info_text:
-                    # Try to find any div that might contain the draw info
-                    for div in block.find_all('div'):
-                        if re.search(r'\d{1,2}\s+[A-Za-z]+\s+\d{4}', div.text) or re.search(r'DRAW\s+NO', div.text, re.IGNORECASE):
-                            draw_info_text = div.text.strip()
-                            break
-                
-                if not draw_info_text:
-                    st.warning(f"Could not find draw info in block {i+1}. Skipping...")
-                    continue
-                
-                # Extract draw date and number
-                draw_date_match = re.search(r'(\d{1,2}\s+[A-Za-z]+\s+\d{4})', draw_info_text)
-                draw_number_match = re.search(r'DRAW\s+NO\.?\s*(\d+)', draw_info_text, re.IGNORECASE)
-                
-                if draw_date_match and draw_number_match:
-                    draw_date_str = draw_date_match.group(1)
+        if date_elements:
+            for element in date_elements:
+                if 'CDATA' not in element:  # Skip script elements
+                    draw_date_str = re.search(date_pattern, element).group(0)
                     try:
                         draw_date = datetime.strptime(draw_date_str, '%d %B %Y').strftime('%Y-%m-%d')
+                        draw_info['draw_date'] = draw_date
+                        st.info(f"Found draw date: {draw_date}")
+                        break
                     except ValueError:
                         try:
                             draw_date = datetime.strptime(draw_date_str, '%d %b %Y').strftime('%Y-%m-%d')
+                            draw_info['draw_date'] = draw_date
+                            st.info(f"Found draw date: {draw_date}")
+                            break
                         except ValueError:
-                            st.warning(f"Couldn't parse date format: {draw_date_str}")
-                            continue
-                    
-                    draw_number = draw_number_match.group(1)
-                    st.info(f"Found draw #{draw_number} on {draw_date}")
-                else:
-                    st.warning(f"Failed to extract date or draw number from: {draw_info_text}")
-                    continue
-                
-                # Extract winning numbers - try different approaches
-                winning_numbers = []
-                additional_number = None
-                
-                # Look for winning numbers divs with potential class names
-                winning_num_classes = ['win-num', 'winning-number', 'toto-winnums', 'number']
-                found_winning_numbers = False
-                
-                for class_name in winning_num_classes:
-                    number_elements = block.find_all('div', class_=class_name)
-                    if number_elements and len(number_elements) > 0:
-                        # If we have 7 numbers, the last one is likely the additional number
-                        if len(number_elements) == 7:
-                            winning_numbers = [int(num.text.strip()) for num in number_elements[:6]]
-                            additional_number = int(number_elements[6].text.strip())
-                        else:
-                            winning_numbers = [int(num.text.strip()) for num in number_elements]
-                        found_winning_numbers = True
+                            pass
+        
+        # Look for draw number
+        draw_pattern = re.compile(r'Draw No\.?\s*(\d+)', re.IGNORECASE)
+        draw_elements = soup.find_all(string=lambda text: bool(text and draw_pattern.search(text)))
+        
+        if draw_elements:
+            for element in draw_elements:
+                match = draw_pattern.search(element)
+                if match:
+                    draw_number = match.group(1)
+                    draw_info['draw_number'] = int(draw_number)
+                    st.info(f"Found draw number: {draw_number}")
+                    break
+        
+        # If we don't have both draw date and number, can't proceed
+        if 'draw_date' not in draw_info or 'draw_number' not in draw_info:
+            st.error("Could not find draw date or number")
+            return pd.DataFrame()
+        
+        # Extract winning numbers
+        winning_numbers = []
+        additional_number = None
+        
+        # Look for the table that contains the winning numbers
+        winning_numbers_header = soup.find(string=re.compile("Winning Numbers", re.IGNORECASE))
+        if winning_numbers_header:
+            # Find the table near this header
+            parent = winning_numbers_header.parent
+            while parent and parent.name != 'table':
+                parent = parent.find_next('table')
+            
+            if parent and parent.name == 'table':
+                # Extract numbers from this table
+                for cell in parent.find_all(['td', 'th']):
+                    cell_text = cell.get_text(strip=True)
+                    if cell_text.isdigit() and 1 <= int(cell_text) <= 49:  # TOTO numbers are 1-49
+                        winning_numbers.append(int(cell_text))
+        
+        # Look for additional number
+        additional_header = soup.find(string=re.compile("Additional Number", re.IGNORECASE))
+        if additional_header:
+            # Find closest table
+            parent = additional_header.parent
+            while parent and parent.name != 'table':
+                parent = parent.find_next('table')
+            
+            if parent and parent.name == 'table':
+                for cell in parent.find_all(['td', 'th']):
+                    cell_text = cell.get_text(strip=True)
+                    if cell_text.isdigit() and 1 <= int(cell_text) <= 49:
+                        additional_number = int(cell_text)
                         break
+        
+        # If we didn't find winning numbers through tables, try an alternative approach
+        # Look for numbers in the sequence of cells that could be winning numbers
+        if not winning_numbers:
+            for div in soup.find_all(['div', 'span']):
+                text = div.get_text(strip=True)
+                if text.isdigit() and 1 <= int(text) <= 49:
+                    winning_numbers.append(int(text))
+                    # If we have 6 numbers, the next one might be the additional
+                    if len(winning_numbers) == 6 and additional_number is None:
+                        # Look at next div/span
+                        next_element = div.find_next(['div', 'span'])
+                        if next_element:
+                            next_text = next_element.get_text(strip=True)
+                            if next_text.isdigit() and 1 <= int(next_text) <= 49:
+                                additional_number = int(next_text)
+                        break
+        
+        # If we found at least 6 numbers (standard TOTO has 6 winning numbers)
+        if len(winning_numbers) >= 6:
+            # In case we found more than 6, keep only the first 6
+            if len(winning_numbers) > 6 and additional_number is None:
+                additional_number = winning_numbers[6]
+                winning_numbers = winning_numbers[:6]
+            
+            st.info(f"Found winning numbers: {winning_numbers}")
+            st.info(f"Found additional number: {additional_number}")
+        else:
+            st.error("Could not find the complete set of winning numbers")
+            if winning_numbers:
+                st.info(f"Partial winning numbers found: {winning_numbers}")
+            return pd.DataFrame()
+        
+        # Extract prize data using tables
+        prize_data = {
+            'group_1_winners': 0, 'group_1_prize': 0,
+            'group_2_winners': 0, 'group_2_prize': 0,
+            'group_3_winners': 0, 'group_3_prize': 0,
+            'group_4_winners': 0, 'group_4_prize': 0,
+            'group_5_winners': 0, 'group_5_prize': 0,
+            'group_6_winners': 0, 'group_6_prize': 0,
+            'group_7_winners': 0, 'group_7_prize': 0,
+            'jackpot_amount': None
+        }
+        
+        # Look for the winning shares table
+        for table in all_tables:
+            # Try to read the table with pandas
+            try:
+                table_html = str(table)
+                df_table = pd.read_html(StringIO(table_html))[0]
                 
-                # If still not found, look for any divs or spans with just numbers
-                if not found_winning_numbers:
-                    number_pattern = re.compile(r'^\s*\d{1,2}\s*$')
-                    number_elements = [el for el in block.find_all(['div', 'span']) 
-                                      if el.text.strip() and number_pattern.match(el.text)]
+                # Check if this looks like a prize table by looking for "Group" in column names or values
+                has_group = any('group' in str(col).lower() for col in df_table.columns) or \
+                            any('group' in str(val).lower() for val in df_table.values.flatten() if isinstance(val, str))
+                
+                if has_group:
+                    st.info("Found prize table")
                     
-                    if number_elements and 6 <= len(number_elements) <= 7:
-                        winning_numbers = [int(num.text.strip()) for num in number_elements[:6]]
-                        if len(number_elements) == 7:
-                            additional_number = int(number_elements[6].text.strip())
-                        found_winning_numbers = True
-                
-                if not found_winning_numbers or not winning_numbers:
-                    st.warning(f"Could not find winning numbers for draw {draw_number}. Skipping...")
-                    continue
-                
-                # Default values for winning shares
-                prize_data = {
-                    'group_1_winners': 0, 'group_1_prize': 0,
-                    'group_2_winners': 0, 'group_2_prize': 0,
-                    'group_3_winners': 0, 'group_3_prize': 0,
-                    'group_4_winners': 0, 'group_4_prize': 0,
-                    'group_5_winners': 0, 'group_5_prize': 0,
-                    'group_6_winners': 0, 'group_6_prize': 0,
-                    'group_7_winners': 0, 'group_7_prize': 0,
-                    'jackpot_amount': None
-                }
-                
-                # Try to find the prize table - look for any table
-                tables = block.find_all('table')
-                if tables:
-                    for table in tables:
-                        rows = table.find_all('tr')
-                        if not rows or len(rows) < 2:
-                            continue
+                    # Try to extract group, winners, and prize information
+                    for _, row in df_table.iterrows():
+                        # Convert row to dict for easier handling
+                        row_dict = row.to_dict()
+                        
+                        # Look for "Group N" pattern in any cell
+                        group_found = False
+                        group_num = None
+                        
+                        for _, cell_value in row_dict.items():
+                            if isinstance(cell_value, str):
+                                group_match = re.search(r'Group\s*(\d)', str(cell_value), re.IGNORECASE)
+                                if group_match:
+                                    group_num = int(group_match.group(1))
+                                    group_found = True
+                                    break
+                        
+                        if group_found and group_num:
+                            # Look for prize amount and winners in this row
+                            prize_amount = None
+                            winners_count = None
                             
-                        # Check first row to see if it looks like a prize table
-                        header = rows[0].get_text(strip=True).lower()
-                        if any(term in header for term in ['group', 'prize', 'winner']):
-                            for row in rows[1:]:  # Skip header
-                                cells = row.find_all(['td', 'th'])
-                                if len(cells) >= 3:
-                                    # Get the text from the first cell to identify the group
-                                    group_text = cells[0].get_text(strip=True)
-                                    group_match = re.search(r'Group\s*(\d)', group_text, re.IGNORECASE)
-                                    
-                                    if group_match:
-                                        group_num = int(group_match.group(1))
-                                        
-                                        # Try to extract winners and prize
-                                        winners_text = cells[1].get_text(strip=True)
-                                        prize_text = cells[2].get_text(strip=True)
-                                        
-                                        # Extract numbers
-                                        winners = 0
-                                        if winners_text != '-':
-                                            winners_match = re.search(r'(\d+[,\d]*)', winners_text)
-                                            if winners_match:
-                                                winners = int(winners_match.group(1).replace(',', ''))
-                                        
-                                        prize = 0
-                                        if prize_text != '-':
-                                            prize_match = re.search(r'\$\s*(\d+[,.\d]*)', prize_text)
-                                            if prize_match:
-                                                prize = float(prize_match.group(1).replace(',', ''))
-                                        
-                                        prize_data[f'group_{group_num}_winners'] = winners
-                                        prize_data[f'group_{group_num}_prize'] = prize
-                
-                # Look for jackpot amount
-                jackpot_text = block.find(text=re.compile('jackpot', re.IGNORECASE))
-                if jackpot_text:
-                    # Search for currency amount in parent element text
-                    jackpot_container = jackpot_text.parent
-                    if jackpot_container:
-                        jackpot_full_text = jackpot_container.get_text(strip=True)
-                        jackpot_match = re.search(r'\$\s*(\d+[,.\d]*)', jackpot_full_text)
-                        if jackpot_match:
-                            prize_data['jackpot_amount'] = float(jackpot_match.group(1).replace(',', ''))
-                
-                # Only process results for the specified dates if provided
-                if dates_to_scrape is None or draw_date in dates_to_scrape:
-                    result = {
-                        'draw_date': draw_date,
-                        'draw_number': int(draw_number),
-                        'winning_numbers': winning_numbers,
-                        'additional_number': additional_number,
-                        **prize_data
-                    }
-                    results.append(result)
-                    
-                    st.success(f"Successfully processed draw #{draw_number} on {draw_date}")
+                            for _, cell_value in row_dict.items():
+                                # Look for dollar amounts for prize
+                                if isinstance(cell_value, str) and '$' in str(cell_value):
+                                    prize_match = re.search(r'\$\s*([\d,]+\.?\d*)', str(cell_value))
+                                    if prize_match:
+                                        prize_amount = float(prize_match.group(1).replace(',', ''))
+                                
+                                # Look for number of winners
+                                if isinstance(cell_value, (int, float)) or (isinstance(cell_value, str) and cell_value.isdigit()):
+                                    winners_count = int(str(cell_value).replace(',', ''))
+                            
+                            # Also try to match "N winners" pattern
+                            if winners_count is None:
+                                for _, cell_value in row_dict.items():
+                                    if isinstance(cell_value, str):
+                                        winners_match = re.search(r'(\d+)[^\d]*winners', str(cell_value), re.IGNORECASE)
+                                        if winners_match:
+                                            winners_count = int(winners_match.group(1).replace(',', ''))
+                            
+                            # Update prize data if we found information
+                            if prize_amount is not None:
+                                prize_data[f'group_{group_num}_prize'] = prize_amount
+                            
+                            if winners_count is not None:
+                                prize_data[f'group_{group_num}_winners'] = winners_count
             except Exception as e:
-                st.error(f"Error processing a result block {i+1}: {str(e)}")
+                st.warning(f"Error processing a table: {str(e)}")
                 continue
+        
+        # If we don't have all the data in the prize_data dictionary yet,
+        # try to extract directly from the table that has 'Group 1' in it
+        if all(value == 0 for key, value in prize_data.items() if key.endswith('_prize')):
+            group_1_element = soup.find(string=re.compile(r'Group\s*1', re.IGNORECASE))
+            if group_1_element:
+                parent_row = group_1_element.find_parent('tr')
+                if parent_row:
+                    cells = parent_row.find_all(['td', 'th'])
+                    for cell in cells:
+                        cell_text = cell.get_text(strip=True)
+                        if '$' in cell_text:
+                            prize_match = re.search(r'\$\s*([\d,]+\.?\d*)', cell_text)
+                            if prize_match:
+                                prize_data['group_1_prize'] = float(prize_match.group(1).replace(',', ''))
+                        elif cell_text.isdigit():
+                            prize_data['group_1_winners'] = int(cell_text)
+        
+        # Create a result entry
+        result = {
+            'draw_date': draw_info['draw_date'],
+            'draw_number': draw_info['draw_number'],
+            'winning_numbers': winning_numbers,
+            'additional_number': additional_number,
+            **prize_data
+        }
+        
+        results.append(result)
+        st.success(f"Successfully processed draw #{draw_info['draw_number']} on {draw_info['draw_date']}")
         
         # Create DataFrame from results
         df = pd.DataFrame(results)
