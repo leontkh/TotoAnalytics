@@ -277,10 +277,14 @@ if st.session_state.toto_data is not None and not st.session_state.toto_data.emp
     
     with col1:
         st.metric("Total Draws", len(st.session_state.toto_data))
-        st.metric("Earliest Record", st.session_state.toto_data['draw_date'].min())
+        # Convert timestamp to string to avoid errors
+        earliest_date = pd.to_datetime(st.session_state.toto_data['draw_date']).min()
+        st.metric("Earliest Record", earliest_date.strftime('%Y-%m-%d'))
     
     with col2:
-        st.metric("Latest Draw", st.session_state.toto_data['draw_date'].max())
+        # Convert timestamp to string to avoid errors
+        latest_date = pd.to_datetime(st.session_state.toto_data['draw_date']).max()
+        st.metric("Latest Draw", latest_date.strftime('%Y-%m-%d'))
         st.metric("Average Group 1 Prize", f"${st.session_state.toto_data['group_1_prize'].mean():,.2f}")
 
     # Data exploration
