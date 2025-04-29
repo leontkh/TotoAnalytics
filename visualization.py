@@ -52,20 +52,19 @@ def plot_prize_pool_trend(df):
     Returns:
         Plotly figure object
     """
-    # Ensure data is sorted by date
-    plot_df = df.sort_values('draw_date')
+    from calculator import calculate_prize_pools
+    
+    # Check if the estimated_prize_pool column exists
+    # If not, calculate it using the calculator function
+    if 'estimated_prize_pool' not in df.columns:
+        print("Calculating prize pools as they don't exist in the data")
+        plot_df = calculate_prize_pools(df).sort_values('draw_date')
+    else:
+        # Ensure data is sorted by date
+        plot_df = df.sort_values('draw_date')
     
     # Create figure with multiple traces
     fig = go.Figure()
-    
-    # Add estimated prize pool
-    fig.add_trace(go.Scatter(
-        x=plot_df['draw_date'],
-        y=plot_df['estimated_prize_pool'],
-        mode='lines+markers',
-        name='Estimated Prize Pool',
-        line=dict(color='green', width=2)
-    ))
     
     # Add Group 1 prize when there are winners
     group1_with_winners = plot_df[plot_df['group_1_winners'] > 0]
@@ -78,18 +77,45 @@ def plot_prize_pool_trend(df):
             marker=dict(color='red', size=10)
         ))
     
-    # Add expected Group 1 prize (including rollovers)
-    fig.add_trace(go.Scatter(
-        x=plot_df['draw_date'],
-        y=plot_df['expected_group1_prize'],
-        mode='lines',
-        name='Expected Group 1 Prize',
-        line=dict(color='purple', width=2, dash='dash')
-    ))
+    # Add average prize trend line
+    # Calculate moving average of Group 1 prizes where winners exist
+    if not group1_with_winners.empty and len(group1_with_winners) >= 3:
+        # Sort by date
+        sorted_prizes = group1_with_winners.sort_values('draw_date')
+        # Calculate rolling average (window size of 3)
+        rolling_avg = sorted_prizes['group_1_prize'].rolling(window=3, min_periods=1).mean()
+        
+        fig.add_trace(go.Scatter(
+            x=sorted_prizes['draw_date'],
+            y=rolling_avg,
+            mode='lines',
+            name='Average Group 1 Prize (3-draw rolling)',
+            line=dict(color='blue', width=2)
+        ))
+    
+    # Add Group 2 prize line
+    if 'group_2_prize' in plot_df.columns:
+        fig.add_trace(go.Scatter(
+            x=plot_df['draw_date'],
+            y=plot_df['group_2_prize'],
+            mode='lines',
+            name='Group 2 Prize',
+            line=dict(color='green', width=2)
+        ))
+    
+    # If we have the expected_group1_prize, add it
+    if 'expected_group1_prize' in plot_df.columns:
+        fig.add_trace(go.Scatter(
+            x=plot_df['draw_date'],
+            y=plot_df['expected_group1_prize'],
+            mode='lines',
+            name='Expected Group 1 Prize',
+            line=dict(color='purple', width=2, dash='dash')
+        ))
     
     # Update layout
     fig.update_layout(
-        title='Prize Pool Trends Over Time',
+        title='Prize Trends Over Time',
         xaxis_title='Draw Date',
         yaxis_title='Amount (SGD)',
         height=500,
